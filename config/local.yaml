@@ -1,0 +1,6 @@
+config_type: "local"
+db:
+  storage_path: "./storage/sso.sqlite3"
+grpc:
+  url: "127.0.0.1"
+  port: 8088
