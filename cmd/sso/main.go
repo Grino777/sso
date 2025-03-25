@@ -1,11 +1,11 @@
 package main
 
-const (
-	envLocal = "local"
-	envDev   = "dev"
-	envProd  = "prod"
+import (
+	"fmt"
+	"sso/internal/config"
 )
 
 func main() {
-
+	cfg := config.Load()
+	fmt.Print(cfg)
 }
