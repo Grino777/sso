@@ -4,3 +4,5 @@ db:
 grpc:
   url: "127.0.0.1"
   port: 8088
+  timeout: 5s
+tokenTTL: 1h

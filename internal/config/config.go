@@ -3,6 +3,7 @@ package config
 import (
 	"flag"
 	"os"
+	"time"
 
 	"github.com/ilyakaznacheev/cleanenv"
 )
@@ -17,9 +18,10 @@ const (
 )
 
 type Config struct {
-	Mode string
-	DB   DBConfig   `yaml:"db" env-required:"true"`
-	GRPC GRPCConfig `yaml:"grpc" env-required:"true"`
+	Mode     string
+	DB       DBConfig      `yaml:"db" env-required:"true"`
+	GRPC     GRPCConfig    `yaml:"grpc" env-required:"true"`
+	TokenTTL time.Duration `yaml:"tokenTTL" env-default:"1h"`
 }
 
 type DBConfig struct {
@@ -27,8 +29,9 @@ type DBConfig struct {
 }
 
 type GRPCConfig struct {
-	Url  string `yaml:"url" env-required:"true"`
-	Port uint16 `yaml:"port" env-required:"true"`
+	Url     string        `yaml:"url" env-required:"true"`
+	Port    uint16        `yaml:"port" env-required:"true"`
+	Timeout time.Duration `yaml:"timeout" env-default:"5s"`
 }
 
 // Загрузка конфигураций для приложения

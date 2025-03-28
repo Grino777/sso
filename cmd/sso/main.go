@@ -1,11 +1,18 @@
 package main
 
 import (
-	"fmt"
+	"log/slog"
+	"os"
+	"sso/internal/app"
 	"sso/internal/config"
+	"sso/internal/logger"
 )
 
 func main() {
 	cfg := config.Load()
-	fmt.Print(cfg)
+	logger := logger.New(os.Stdout, slog.LevelDebug)
+
+	app := app.New(cfg, logger)
+	// app.Run()
+
 }
