@@ -1,24 +1,26 @@
 package app
 
 import (
+	"log/slog"
+	grpcapp "sso/internal/app/grpc"
 	"sso/internal/config"
-	"sso/internal/logger"
 )
 
 type App struct {
-	Config *config.Config
-	Logger *logger.Logger
-	// GRPCServer *GRPCServer
+	Config     *config.Config
+	Logger     *slog.Logger
+	GRPCServer *grpcapp.App
 }
 
-func New(cfg *config.Config, logger *logger.Logger) *App {
+func New(
+	cfg *config.Config,
+	log *slog.Logger,
+) *App {
+	gRPCServer := grpcapp.New(cfg, log)
+
 	return &App{
-		Config: cfg,
-		Logger: logger,
+		Config:     cfg,
+		Logger:     log,
+		GRPCServer: gRPCServer,
 	}
-}
-
-func (a *App) Run() error {
-	// logger
-	return nil
 }
