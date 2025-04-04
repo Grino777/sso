@@ -1,10 +1,11 @@
 -- +goose Up
 -- +goose StatementBegin
+
 CREATE TABLE
     users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         username VARCHAR(50) NOT NULL,
-        password VARCHAR(100) NOT NULL
+        pass_hash VARCHAR(100) NOT NULL
     );
 
 CREATE TABLE

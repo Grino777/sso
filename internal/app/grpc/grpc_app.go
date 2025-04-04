@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
-	"sso/internal/config"
+	grpcauth "sso/internal/grpc/auth"
 
 	"github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/logging"
 	"github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/recovery"
@@ -16,13 +16,17 @@ import (
 
 // gRPC server application
 type App struct {
-	cfg        *config.Config
 	log        *slog.Logger
 	gRPCServer *grpc.Server
+	port       int
 }
 
 // Create gRPC server object
-func New(cfg *config.Config, log *slog.Logger) *App {
+func New(
+	log *slog.Logger,
+	authService grpcauth.Auth,
+	port int,
+) *App {
 
 	loggingOpts := []logging.Option{
 		logging.WithLogOnEvents(logging.PayloadReceived, logging.PayloadSent),
@@ -41,10 +45,12 @@ func New(cfg *config.Config, log *slog.Logger) *App {
 		logging.UnaryServerInterceptor(InterceptorLogger(log), loggingOpts...),
 	))
 
+	grpcauth.Register(gRPCServer, authService)
+
 	return &App{
-		cfg:        cfg,
 		log:        log,
 		gRPCServer: gRPCServer,
+		port:       port,
 	}
 }
 
@@ -67,7 +73,7 @@ func (a *App) MustRun() {
 func (a *App) Run() error {
 	const op = "grpcapp.Run"
 
-	l, err := net.Listen("tcp", fmt.Sprintf(":%d", a.cfg.GRPC.Port))
+	l, err := net.Listen("tcp", fmt.Sprintf(":%d", a.port))
 	if err != nil {
 		panic(fmt.Errorf("%s: %w", op, err))
 	}
@@ -86,7 +92,7 @@ func (a *App) Run() error {
 func (a *App) Stop() {
 	const op = "grpcapp.Stop"
 
-	a.log.With(slog.String("op", op)).Info("stoping gRPC server", slog.Int("port", int(a.cfg.GRPC.Port)))
+	a.log.With(slog.String("op", op)).Info("stoping gRPC server", slog.Int("port", int(a.port)))
 
 	a.gRPCServer.GracefulStop()
 }
