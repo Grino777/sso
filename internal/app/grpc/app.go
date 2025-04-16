@@ -5,7 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
-	grpcauth "sso/internal/grpc/auth"
+	grpcauth "sso/internal/grpc/server"
+	"sso/internal/storage"
 
 	"github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/logging"
 	"github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/recovery"
@@ -14,26 +15,26 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// gRPC server application
+// Объект приложения для управления GRPC сервром
 type App struct {
 	log        *slog.Logger
 	gRPCServer *grpc.Server
 	port       int
 }
 
-// Create gRPC server object
 func New(
 	log *slog.Logger,
-	authService grpcauth.Auth,
+	authService grpcauth.AuthService,
+	storage *storage.Storage,
 	port int,
 ) *App {
 
 	loggingOpts := []logging.Option{
-		logging.WithLogOnEvents(logging.PayloadReceived, logging.PayloadSent),
+		logging.WithLogOnEvents(logging.PayloadSent),
 	}
 
 	recoverOptions := []recovery.Option{
-		recovery.WithRecoveryHandler(func(p interface{}) (err error) {
+		recovery.WithRecoveryHandler(func(p any) (err error) {
 			log.Error("Recovered from panic", slog.Any("error", err))
 
 			return status.Error(codes.Internal, "internal error")
@@ -43,9 +44,10 @@ func New(
 	gRPCServer := grpc.NewServer(grpc.ChainUnaryInterceptor(
 		recovery.UnaryServerInterceptor(recoverOptions...),
 		logging.UnaryServerInterceptor(InterceptorLogger(log), loggingOpts...),
+		HMACInterceptor(log, storage),
 	))
 
-	grpcauth.Register(gRPCServer, authService)
+	grpcauth.RegServer(gRPCServer, authService)
 
 	return &App{
 		log:        log,

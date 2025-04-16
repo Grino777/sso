@@ -20,11 +20,10 @@ func New(
 	log *slog.Logger,
 ) *App {
 	storage := storage.New("sqlite3", cfg.DB.Storage_path)
-	defer storage.Close()
 
 	authService := auth.New(log, storage, storage, storage, cfg.TokenTTL)
 
-	gRPCServer := grpcapp.New(log, authService, int(cfg.GRPC.Port))
+	gRPCServer := grpcapp.New(log, authService, storage, int(cfg.GRPC.Port))
 
 	return &App{
 		Config:     cfg,

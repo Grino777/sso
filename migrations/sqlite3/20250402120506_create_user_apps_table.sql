@@ -5,6 +5,7 @@ CREATE TABLE
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER NOT NULL,
         app_id INTEGER NOT NULL,
+        is_blocked INTEGER NOT NULL DEFAULT 0 CHECK (is_blocked in (0, 1)),
         FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
         FOREIGN KEY (app_id) REFERENCES apps (id) ON DELETE CASCADE
     );

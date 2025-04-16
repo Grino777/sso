@@ -7,5 +7,6 @@
             "database": "${workspaceFolder:sso-app}/storage/sso.sqlite3",
             "name": "SSO"
         }
-    ]
+    ],
+    "editor.wordWrap": "on"
 }

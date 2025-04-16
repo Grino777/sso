@@ -7,6 +7,6 @@ import (
 
 func New(out io.Writer, level slog.Level) *slog.Logger {
 	options := &slog.HandlerOptions{Level: level} // Используем переданный level
-	handler := slog.NewTextHandler(out, options)
+	handler := slog.NewJSONHandler(out, options)
 	return slog.New(handler)
 }
