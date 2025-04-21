@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"net"
 	grpcauth "sso/internal/grpc/server"
-	"sso/internal/storage"
+	sqlitestore "sso/internal/storage/sqlite"
 
 	"github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/logging"
 	"github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/recovery"
@@ -25,7 +25,7 @@ type App struct {
 func New(
 	log *slog.Logger,
 	authService grpcauth.AuthService,
-	storage *storage.Storage,
+	storage *sqlitestore.Storage,
 	port int,
 ) *App {
 

@@ -20,6 +20,7 @@ const (
 type Config struct {
 	Mode     string
 	DB       DBConfig      `yaml:"db" env-required:"true"`
+	Redis    RedisConfig   `yaml:"redis" env-required:"true"`
 	GRPC     GRPCConfig    `yaml:"grpc" env-required:"true"`
 	TokenTTL time.Duration `yaml:"tokenTTL" env-default:"1h"`
 }
@@ -32,6 +33,16 @@ type GRPCConfig struct {
 	Url     string        `yaml:"url" env-required:"true"`
 	Port    uint16        `yaml:"port" env-required:"true"`
 	Timeout time.Duration `yaml:"timeout" env-default:"5s"`
+}
+
+type RedisConfig struct {
+	Addr        string        `yaml:"addr" default:"127.0.0.1"`
+	Password    string        `yaml:"password"`
+	User        string        `yaml:"user"`
+	DB          int           `yaml:"db" default:"0"`
+	MaxRetries  int           `yaml:"max_retries" default:"5"`
+	DialTimeout time.Duration `yaml:"dial_timeout" default:"10"`
+	Timeout     time.Duration `yaml:"timeout" default:"5"`
 }
 
 // Загрузка конфигураций для приложения

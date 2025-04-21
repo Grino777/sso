@@ -7,12 +7,14 @@ import (
 	"sso/internal/app"
 	"sso/internal/config"
 	"sso/internal/lib/logger"
+	"sso/internal/utils/storage"
 	"syscall"
 
 	_ "github.com/mattn/go-sqlite3"
 )
 
 func main() {
+	storage.CheckStorageFolder()
 	cfg := config.Load()
 	log := logger.New(os.Stdout, slog.LevelDebug)
 

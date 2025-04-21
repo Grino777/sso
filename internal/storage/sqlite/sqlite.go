@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"sso/internal/domain/models"
+	"sso/internal/storage"
 	"sso/migrations"
 
 	"github.com/mattn/go-sqlite3"
@@ -57,7 +58,7 @@ func (s *Storage) SaveUser(
 		var sqlErr sqlite3.Error
 
 		if errors.As(err, &sqlErr) && sqlErr.ExtendedCode == sqlite3.ErrConstraintUnique {
-			return fmt.Errorf("%s: %w", op, ErrUserExist)
+			return fmt.Errorf("%s: %w", op, storage.ErrUserExist)
 		}
 
 		return fmt.Errorf("%s: %w", op, err)

@@ -6,3 +6,11 @@ grpc:
   port: 8088
   timeout: 5s
 tokenTTL: 1h
+redis:
+    addr: 127.0.0.1
+    password: ""
+    user: ""
+    db: 0
+    maxretries: 5
+    dialtimeout: 10
+    timeout: 5
