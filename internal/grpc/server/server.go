@@ -61,6 +61,7 @@ func (s *AuthServer) Login(
 
 }
 
+// FIXME
 func (s *AuthServer) Logout(
 	ctx context.Context,
 	req *sso_v1.LogoutRequest,
@@ -96,6 +97,7 @@ func (s *AuthServer) Register(
 	return &sso_v1.RegisterResponse{Success: true}, nil
 }
 
+// FIXME
 func (s *AuthServer) IsAdmin(
 	ctx context.Context,
 	req *sso_v1.IsAdminRequest,

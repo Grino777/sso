@@ -118,6 +118,7 @@ func (s *SQLiteStorage) GetApp(
 	return app, nil
 }
 
+// FIXME
 func (s *SQLiteStorage) IsAdmin(
 	ctx context.Context,
 	username string,
@@ -125,13 +126,10 @@ func (s *SQLiteStorage) IsAdmin(
 	panic("implement me")
 }
 
+// FIXME
 func (s *SQLiteStorage) SaveUserToken(ctx context.Context,
 	user models.User,
 	app models.App,
 ) error {
 	panic("implement me!")
 }
-
-// func saveUserToUserApps(ctx context.Context, userID int, appID int) error {
-// 	panic("implement me")
-// }

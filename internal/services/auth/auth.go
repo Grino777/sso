@@ -121,6 +121,7 @@ func (s *AuthService) Register(
 	return nil
 }
 
+// FIXME
 func (s *AuthService) Logout(
 	ctx context.Context,
 	token string,
@@ -128,6 +129,7 @@ func (s *AuthService) Logout(
 	panic("implement me")
 }
 
+// FIXME
 func (s *AuthService) IsAdmin(
 	ctx context.Context,
 	username string,

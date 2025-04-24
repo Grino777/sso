@@ -145,16 +145,19 @@ func (rs *RedisStorage) SaveUser(ctx context.Context, username string, passHash 
 	})
 }
 
+// FIXME
 func (rs *RedisStorage) GetUser(ctx context.Context, username string, appID uint32) (models.User, error) {
-	panic("implemet me!")
+	panic("implement me!")
 }
 
+// FIXME
 func (rs *RedisStorage) GetApp(ctx context.Context, appID uint32) (app models.App, err error) {
-	panic("implemet me!")
+	panic("implement me!")
 }
 
+// FIXME
 func (rs *RedisStorage) IsAdmin(ctx context.Context, username string) (isAdmin bool, err error) {
-	panic("implemet me!")
+	panic("implement me!")
 }
 
 // FIXME
@@ -162,7 +165,7 @@ func (rs *RedisStorage) SaveUserToken(ctx context.Context,
 	user models.User,
 	app models.App,
 ) error {
-	panic("implemet me!")
+	panic("implement me!")
 }
 
 // Close Redis session
