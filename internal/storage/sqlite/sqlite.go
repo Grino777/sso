@@ -125,11 +125,3 @@ func (s *SQLiteStorage) IsAdmin(
 ) (isAdmin bool, err error) {
 	panic("implement me")
 }
-
-// FIXME
-func (s *SQLiteStorage) SaveUserToken(ctx context.Context,
-	user models.User,
-	app models.App,
-) error {
-	panic("implement me!")
-}
