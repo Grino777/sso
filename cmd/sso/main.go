@@ -4,17 +4,18 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
-	"sso/internal/app"
-	"sso/internal/config"
-	"sso/internal/lib/logger"
-	"sso/internal/utils/storage"
 	"syscall"
+
+	"github.com/Grino777/sso/internal/app"
+	"github.com/Grino777/sso/internal/config"
+	"github.com/Grino777/sso/internal/lib/logger"
+	storageU "github.com/Grino777/sso/internal/utils/storage"
 
 	_ "github.com/mattn/go-sqlite3"
 )
 
 func main() {
-	storage.CheckStorageFolder()
+	storageU.CheckStorageFolder()
 	cfg := config.Load()
 	log := logger.New(os.Stdout, slog.LevelDebug)
 

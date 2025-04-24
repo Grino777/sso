@@ -2,37 +2,53 @@ package app
 
 import (
 	"log/slog"
-	grpcapp "sso/internal/app/grpc"
-	"sso/internal/config"
-	"sso/internal/services/auth"
-	reidsstore "sso/internal/storage/redis"
-	sqlitestore "sso/internal/storage/sqlite"
+
+	grpcapp "github.com/Grino777/sso/internal/app/grpc"
+	"github.com/Grino777/sso/internal/config"
+	"github.com/Grino777/sso/internal/services/auth"
+	"github.com/Grino777/sso/internal/storage"
+	redisApp "github.com/Grino777/sso/internal/storage/redis"
+	dbApp "github.com/Grino777/sso/internal/storage/sqlite"
 )
 
 type App struct {
 	Config       *config.Config
 	Logger       *slog.Logger
-	GRPCServer   *grpcapp.App
-	DBStorage    *sqlitestore.Storage
-	RedisStorage *reidsstore.RedisStore
+	GRPCServer   *grpcapp.GRPCApp
+	DBStorage    storage.Storage
+	RedisStorage storage.Storage
 }
 
 func New(
 	cfg *config.Config,
 	log *slog.Logger,
 ) *App {
-	sqliteStore := sqlitestore.New("sqlite3", cfg.DB.Storage_path)
-	reidsStore := reidsstore.New(cfg.Redis)
+	db := dbApp.New("sqlite3", cfg.DB.Storage_path, cfg.DBUser)
+	dbStorage := dbApp.ToStorage(db)
 
-	authService := auth.New(log, sqliteStore, sqliteStore, sqliteStore, cfg.TokenTTL)
+	redis := redisApp.New(cfg.Redis, log)
+	cacheStorage := redisApp.ToStorage(redis)
 
-	gRPCServer := grpcapp.New(log, authService, sqliteStore, int(cfg.GRPC.Port))
+	authService := auth.New(log, dbStorage, cacheStorage, cfg.TokenTTL)
+
+	grpcServer := grpcapp.New(log, authService, dbStorage, cacheStorage, int(cfg.GRPC.Port), cfg.Mode)
 
 	return &App{
 		Config:       cfg,
 		Logger:       log,
-		GRPCServer:   gRPCServer,
-		DBStorage:    sqliteStore,
-		RedisStorage: reidsStore,
+		GRPCServer:   grpcServer,
+		DBStorage:    dbStorage,
+		RedisStorage: cacheStorage,
 	}
+}
+
+func (a *App) Stop() {
+	const op = "app.app.Stop"
+
+	log := a.Logger.With("op", op)
+
+	a.DBStorage.Closer.Close()
+	log.Debug("db session closed")
+	a.RedisStorage.Closer.Close()
+	log.Debug("redis session closed")
 }

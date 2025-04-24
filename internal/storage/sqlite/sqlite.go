@@ -1,46 +1,51 @@
 // Пакет для взаимодействия с БД. Обрабатывает "запросы" приходящие от бизнес-логики.
-package storage
+package sqlite
 
 import (
 	"context"
 	"database/sql"
 	"errors"
 	"fmt"
-	"sso/internal/domain/models"
-	"sso/internal/storage"
-	"sso/migrations"
+
+	"github.com/Grino777/sso/internal/config"
+	"github.com/Grino777/sso/internal/domain/models"
+	"github.com/Grino777/sso/internal/storage"
+	sUtils "github.com/Grino777/sso/internal/utils/storage/sqlite"
+	"github.com/Grino777/sso/migrations"
 
 	"github.com/mattn/go-sqlite3"
 )
 
-type Storage struct {
+type SQLiteStorage struct {
 	driverName string
 	db         *sql.DB
 }
 
 // Creates a new DB session and performs migrations
-func New(driverName string, dbPath string) *Storage {
+func New(driverName string, dbPath string, dbUser config.DBUser) *SQLiteStorage {
 	db, err := sql.Open(driverName, dbPath)
 	if err != nil {
 		panic("failed to connect to database: " + err.Error())
 	}
 
-	s := Storage{
+	s := SQLiteStorage{
 		driverName: driverName,
 		db:         db,
 	}
 
 	migrations.Migrate(s.db, driverName)
+	sUtils.CreateSuperUser(s.db, dbUser.User, dbUser.Password)
 
 	return &s
 }
 
 // Close DB session
-func (s *Storage) Close() error {
-	return s.db.Close()
+func (s *SQLiteStorage) Close() error {
+	s.db.Close()
+	return nil
 }
 
-func (s *Storage) SaveUser(
+func (s *SQLiteStorage) SaveUser(
 	ctx context.Context,
 	username string,
 	passHash string,
@@ -72,15 +77,31 @@ func (s *Storage) SaveUser(
 	return nil
 }
 
-func (s *Storage) GetUser(
+func (s *SQLiteStorage) GetUser(
 	ctx context.Context,
 	username string,
 	appID uint32,
 ) (models.User, error) {
-	panic("implemente me")
+	const op = "storage.sqlite.GetUser"
+
+	var user models.User
+
+	query := "SELECT * FROM users WHERE username = ?"
+	err := s.db.QueryRowContext(ctx, query, username).Scan(
+		&user.ID,
+		&user.Username,
+		&user.PassHash,
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return models.User{}, storage.ErrUserNotFound
+		}
+		return models.User{}, fmt.Errorf("%s: %v", op, err)
+	}
+	return user, nil
 }
 
-func (s *Storage) GetApp(
+func (s *SQLiteStorage) GetApp(
 	ctx context.Context,
 	appID uint32,
 ) (app models.App, err error) {
@@ -97,11 +118,18 @@ func (s *Storage) GetApp(
 	return app, nil
 }
 
-func (s *Storage) IsAdmin(
+func (s *SQLiteStorage) IsAdmin(
 	ctx context.Context,
 	username string,
 ) (isAdmin bool, err error) {
 	panic("implement me")
+}
+
+func (s *SQLiteStorage) SaveUserToken(ctx context.Context,
+	user models.User,
+	app models.App,
+) error {
+	panic("implement me!")
 }
 
 // func saveUserToUserApps(ctx context.Context, userID int, appID int) error {

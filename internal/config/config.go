@@ -2,10 +2,12 @@ package config
 
 import (
 	"flag"
+	"fmt"
 	"os"
 	"time"
 
 	"github.com/ilyakaznacheev/cleanenv"
+	"github.com/joho/godotenv"
 )
 
 const (
@@ -15,6 +17,8 @@ const (
 	localConfig = "config/local.yaml"
 	devConfig   = "config/dev.yaml"
 	prodConfig  = "config/prod.yaml"
+	db_user     = "DB_USER"
+	db_pass     = "DB_PASSWORD"
 )
 
 type Config struct {
@@ -23,6 +27,12 @@ type Config struct {
 	Redis    RedisConfig   `yaml:"redis" env-required:"true"`
 	GRPC     GRPCConfig    `yaml:"grpc" env-required:"true"`
 	TokenTTL time.Duration `yaml:"tokenTTL" env-default:"1h"`
+	DBUser   DBUser
+}
+
+type DBUser struct {
+	User     string
+	Password string
 }
 
 type DBConfig struct {
@@ -45,8 +55,12 @@ type RedisConfig struct {
 	Timeout     time.Duration `yaml:"timeout" default:"5"`
 }
 
-// Загрузка конфигураций для приложения
+// Загрузка конфигураций и .env для приложения
 func Load() *Config {
+	if err := godotenv.Load(); err != nil {
+		panic(".env file not found or failed to load")
+	}
+
 	cfgPath := path()
 	cfg := mustParseConfig(cfgPath)
 	return cfg
@@ -72,8 +86,30 @@ func mustParseConfig(configPath string) *Config {
 		panic("cannot read config:" + err.Error())
 	}
 
+	dbUser := parseEnv()
+	cfg.DBUser = dbUser
+
 	return &cfg
 
+}
+
+func parseEnv() DBUser {
+	user := parseEnvValue(db_user)
+	pass := parseEnvValue(db_pass)
+
+	return DBUser{
+		User:     user,
+		Password: pass,
+	}
+}
+
+func parseEnvValue(key string) string {
+	res := os.Getenv(key)
+	if res != "" {
+		return res
+	}
+	errString := fmt.Sprintf("%s not specifed in env", res)
+	panic(errString)
 }
 
 // Парсит mode из переданных args во время запуска приложения

@@ -1,12 +1,13 @@
-package grpcapp
+package grpc
 
 import (
 	"context"
 	"fmt"
 	"log/slog"
 	"net"
-	grpcauth "sso/internal/grpc/server"
-	sqlitestore "sso/internal/storage/sqlite"
+
+	grpcauth "github.com/Grino777/sso/internal/grpc/server"
+	"github.com/Grino777/sso/internal/storage"
 
 	"github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/logging"
 	"github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/recovery"
@@ -16,21 +17,24 @@ import (
 )
 
 // Объект приложения для управления GRPC сервром
-type App struct {
+type GRPCApp struct {
 	log        *slog.Logger
 	gRPCServer *grpc.Server
 	port       int
+	mode       string
 }
 
 func New(
 	log *slog.Logger,
 	authService grpcauth.AuthService,
-	storage *sqlitestore.Storage,
+	dbstore storage.Storage,
+	redisstore storage.Storage,
 	port int,
-) *App {
+	mode string,
+) *GRPCApp {
 
 	loggingOpts := []logging.Option{
-		logging.WithLogOnEvents(logging.PayloadSent),
+		logging.WithLogOnEvents(logging.StartCall, logging.FinishCall),
 	}
 
 	recoverOptions := []recovery.Option{
@@ -44,15 +48,16 @@ func New(
 	gRPCServer := grpc.NewServer(grpc.ChainUnaryInterceptor(
 		recovery.UnaryServerInterceptor(recoverOptions...),
 		logging.UnaryServerInterceptor(InterceptorLogger(log), loggingOpts...),
-		HMACInterceptor(log, storage),
+		HMACInterceptor(log, dbstore, mode),
 	))
 
 	grpcauth.RegServer(gRPCServer, authService)
 
-	return &App{
+	return &GRPCApp{
 		log:        log,
 		gRPCServer: gRPCServer,
 		port:       port,
+		mode:       mode,
 	}
 }
 
@@ -65,14 +70,14 @@ func InterceptorLogger(l *slog.Logger) logging.Logger {
 }
 
 // Run gRPC server and panics if any error occurs.
-func (a *App) MustRun() {
+func (a *GRPCApp) MustRun() {
 	if err := a.Run(); err != nil {
 		panic(err)
 	}
 }
 
 // Run gRPC Server
-func (a *App) Run() error {
+func (a *GRPCApp) Run() error {
 	const op = "grpcapp.Run"
 
 	l, err := net.Listen("tcp", fmt.Sprintf(":%d", a.port))
@@ -80,7 +85,10 @@ func (a *App) Run() error {
 		panic(fmt.Errorf("%s: %w", op, err))
 	}
 
-	a.log.Info("grpc server is running", slog.String("addr", (l.Addr().String())))
+	a.log.Info("grpc server is running",
+		slog.String("addr", (l.Addr().String())),
+		slog.String("mode", a.mode),
+	)
 
 	if err := a.gRPCServer.Serve(l); err != nil {
 		return fmt.Errorf("%s: %w", op, err)
@@ -91,7 +99,7 @@ func (a *App) Run() error {
 }
 
 // GracefulStop gRPC Server
-func (a *App) Stop() {
+func (a *GRPCApp) Stop() {
 	const op = "grpcapp.Stop"
 
 	a.log.With(slog.String("op", op)).Info("stoping gRPC server", slog.Int("port", int(a.port)))

@@ -7,11 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"sso/internal/domain/models"
-	cjwt "sso/internal/lib/jwt"
-	"sso/internal/lib/logger"
-	"sso/internal/storage"
 	"time"
+
+	"github.com/Grino777/sso/internal/domain/models"
+	cjwt "github.com/Grino777/sso/internal/lib/jwt"
+	"github.com/Grino777/sso/internal/lib/logger"
+	"github.com/Grino777/sso/internal/storage"
 
 	"golang.org/x/crypto/bcrypt"
 )
@@ -22,38 +23,24 @@ var (
 
 // Объект для взаимодейсвтия с БД
 type AuthService struct {
-	log          *slog.Logger
-	userSaver    UserSaver
-	userProvider UserProvider
-	appProvider  AppProvider
-	tokenTTL     time.Duration
+	log      *slog.Logger
+	db       storage.Storage
+	cache    storage.Storage
+	tokenTTL time.Duration
 }
 
 func New(
 	log *slog.Logger,
-	userSaver UserSaver,
-	userProvider UserProvider,
-	appProvider AppProvider,
+	db storage.Storage,
+	cache storage.Storage,
 	tokenTTL time.Duration,
 ) *AuthService {
 	return &AuthService{
-		log:          log,
-		userSaver:    userSaver,
-		userProvider: userProvider,
-		appProvider:  appProvider,
-		tokenTTL:     tokenTTL,
+		log:      log,
+		db:       db,
+		cache:    cache,
+		tokenTTL: tokenTTL,
 	}
-}
-
-// Логика сохранения пользователя
-type UserSaver interface {
-	SaveUser(ctx context.Context, username string, password string) error
-}
-
-// Логика получения пользователя и проверки на админа
-type UserProvider interface {
-	GetUser(ctx context.Context, username string, appID uint32) (models.User, error)
-	IsAdmin(ctx context.Context, username string) (bool, error)
 }
 
 func (s *AuthService) Login(
@@ -69,33 +56,31 @@ func (s *AuthService) Login(
 		slog.String("username", username),
 	)
 
-	log.Info("attempting to login user")
-
-	user, err := s.userProvider.GetUser(ctx, username, appID)
+	user, err := s.db.Users.GetUser(ctx, username, appID)
 	if err != nil {
 		if errors.Is(err, storage.ErrUserNotFound) {
-			s.log.Warn("user not found", logger.Error(err))
+			log.Error("user not found", logger.Error(err))
 
 			return "", fmt.Errorf("%s: %w", op, ErrInvalidCredentials)
 		}
 
-		s.log.Error("failed to get user", logger.Error(err))
+		log.Error("failed to get user", logger.Error(err))
 
 		return "", fmt.Errorf("%s: %w", op, err)
 	}
 
 	if err := bcrypt.CompareHashAndPassword(user.PassHash, []byte(password)); err != nil {
-		s.log.Error("invalid credentials", logger.Error(err))
+		log.Error("invalid credentials", logger.Error(err))
 
 		return "", fmt.Errorf("%s: %w", op, err)
 	}
 
-	app, err := s.appProvider.GetApp(ctx, appID)
+	app, err := s.db.Apps.GetApp(ctx, appID)
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", op, err)
 	}
 
-	s.log.Info("logged is successfully", slog.String("username", username))
+	log.Info("logged is successfully", slog.String("username", username))
 
 	tokenString, err := cjwt.NewToken(user, app, s.tokenTTL)
 	if err != nil {
@@ -120,13 +105,19 @@ func (s *AuthService) Register(
 
 	log.Info("registering user")
 
-	err := s.userSaver.SaveUser(ctx, username, password)
+	passHash, err := createPassHash(password)
+	if err != nil {
+		log.Error("failed to generate pass hash", "user", username)
+
+		return fmt.Errorf("%s: %v", op, err)
+	}
+
+	err = s.db.Users.SaveUser(ctx, username, passHash)
 	if err != nil {
 		log.Error("failed to save user", logger.Error(err))
 
 		return fmt.Errorf("%s: %w", op, err)
 	}
-
 	return nil
 }
 
@@ -144,16 +135,11 @@ func (s *AuthService) IsAdmin(
 	panic("implement me")
 }
 
-// Логика получения приложения (в таблице БД)
-type AppProvider interface {
-	GetApp(ctx context.Context, appID uint32) (models.App, error)
-}
-
 func (s *AuthService) GetApp(
 	ctx context.Context,
 	appID uint32,
 ) (models.App, error) {
-	app, err := s.appProvider.GetApp(ctx, appID)
+	app, err := s.db.Apps.GetApp(ctx, appID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			s.log.Error("record not found", "appID", appID)
@@ -161,7 +147,15 @@ func (s *AuthService) GetApp(
 			return models.App{}, err
 		}
 	}
-
 	return app, nil
+}
 
+func createPassHash(pass string) (string, error) {
+	const op = "services.auth.createPassHash"
+
+	passHash, err := bcrypt.GenerateFromPassword([]byte(pass), bcrypt.DefaultCost)
+	if err != nil {
+		return "", fmt.Errorf("%s: %v", op, err)
+	}
+	return string(passHash), nil
 }

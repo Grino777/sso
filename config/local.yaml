@@ -7,10 +7,10 @@ grpc:
   timeout: 5s
 tokenTTL: 1h
 redis:
-    addr: 127.0.0.1
+    addr: "127.0.0.1:6379"
     password: ""
     user: ""
     db: 0
-    maxretries: 5
-    dialtimeout: 10
-    timeout: 5
+    max_retries: 5
+    dial_timeout: 10s
+    timeout: 5s

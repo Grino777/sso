@@ -1,4 +1,4 @@
-package grpcapp
+package grpc
 
 import (
 	"context"
@@ -10,9 +10,10 @@ import (
 	"fmt"
 	"log/slog"
 	"reflect"
-	"sso/internal/storage"
 	"strconv"
 	"time"
+
+	"github.com/Grino777/sso/internal/storage"
 
 	sso_v1 "github.com/Grino777/sso-proto/gen/go/sso"
 	"google.golang.org/grpc"
@@ -27,52 +28,68 @@ var (
 	errInvalidArgs      = status.Error(codes.Unauthenticated, "invalid or missing authorization")
 )
 
-func HMACInterceptor(log *slog.Logger, storage *storage.Storage) grpc.UnaryServerInterceptor {
+func HMACInterceptor(log *slog.Logger, dbStore storage.Storage, mode string) grpc.UnaryServerInterceptor {
 	return func(
 		ctx context.Context,
 		req any,
 		info *grpc.UnaryServerInfo,
 		handler grpc.UnaryHandler,
 	) (any, error) {
-		const op = "grpcapp.middleware.HMACInterceptor"
-
-		md, exist := metadata.FromIncomingContext(ctx)
-		if !exist {
-			return nil, status.Error(codes.Unauthenticated, "unauthenticated")
+		switch mode {
+		case "local":
+			return handler(ctx, req)
+		default:
+			return validateHMAC(ctx, log, req, dbStore, handler)
 		}
-
-		secret, err := appSecret(md)
-		if err != nil {
-			log.Error("%s: %v", op, err)
-			return nil, status.Error(codes.Unauthenticated, err.Error())
-		}
-
-		appID, timestamp, err := requestMetadata(req)
-		if err != nil {
-			log.Error("%s: %v", op, err)
-			return nil, err
-		}
-
-		is_valid, err := validateSecret(appID, timestamp, secret, storage)
-		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				log.Error("app not found", "appID", appID, "error", err.Error())
-			}
-
-			log.Error("failed to parse timestamp", "appID", appID, "timestamp", timestamp, "error", err.Error())
-
-			return nil, status.Error(codes.Unauthenticated, "invalid data transmitted")
-		}
-		if !is_valid {
-			log.Error("invalid HMAC", "appID", appID)
-
-			return nil, status.Error(codes.Unauthenticated, "invalid data transmitted")
-		}
-
-		fmt.Println(appID, timestamp, secret)
-
-		return handler(ctx, req)
 	}
+}
+
+func validateHMAC(ctx context.Context,
+	log *slog.Logger,
+	req any,
+	dbStore storage.Storage,
+	handler grpc.UnaryHandler,
+) (any, error) {
+	const op = "grpcapp.middleware.processReq"
+	md, exist := metadata.FromIncomingContext(ctx)
+	if !exist {
+		return nil, status.Error(codes.Unauthenticated, "unauthenticated")
+	}
+
+	secret, err := appSecret(md)
+	if err != nil {
+		log.Error("%s: %v", op, err)
+		return nil, status.Error(codes.Unauthenticated, err.Error())
+	}
+
+	appID, timestamp, err := requestMetadata(req)
+	if err != nil {
+		log.Error("%s: %v", op, err)
+		return nil, err
+	}
+
+	valid, err := validateSecret(appID, timestamp, secret, dbStore)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			log.Error("app not found", "appID", appID, "error", err.Error())
+		}
+
+		log.Error("failed to parse timestamp", "appID", appID, "timestamp", timestamp, "error", err.Error())
+
+		return nil, status.Error(codes.Unauthenticated, "invalid data transmitted")
+	}
+	if !valid {
+		log.Error("invalid HMAC", "appID", appID)
+
+		return nil, status.Error(codes.Unauthenticated, "invalid data transmitted")
+	}
+
+	log.Debug("HMAC validated",
+		slog.Uint64("appID", uint64(appID)),
+		slog.String("timestamp", timestamp),
+	)
+
+	return handler(ctx, req)
 }
 
 func appSecret(md metadata.MD) (secret string, err error) {
@@ -107,20 +124,26 @@ func computeHMAC(data, secret string) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-func validateSecret(appID uint, timestamp, secret string, storage *storage.Storage) (bool, error) {
+func validateSecret(
+	appID uint,
+	timestamp string,
+	secret string,
+	dbStore storage.Storage,
+) (bool, error) {
 	ts, err := time.Parse(time.RFC3339, timestamp)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("failed parse timestamp: %w, %v", err, timestamp)
 	}
+
 	ctx := context.Background()
-	data := timestamp + strconv.Itoa(int(appID))
+	data := ts.Format(time.RFC3339) + strconv.Itoa(int(appID))
 
 	now := time.Now().UTC()
-	if ts.Before(now.Add(-2 * time.Minute)) {
-		return false, errInvalidTimestamp
+	if ts.Before(now.Add(-2*time.Minute)) || ts.After(now.Add(5*time.Second)) {
+		return false, fmt.Errorf("%w: current time %v", errInvalidTimestamp, now.Format(time.RFC3339))
 	}
 
-	app, err := storage.GetApp(ctx, uint32(appID))
+	app, err := dbStore.Apps.GetApp(ctx, uint32(appID))
 	if err != nil {
 		return false, err
 	}

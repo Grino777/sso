@@ -4,8 +4,10 @@ package server
 import (
 	"context"
 	"errors"
-	"sso/internal/services/auth"
-	"sso/internal/storage"
+	"strings"
+
+	"github.com/Grino777/sso/internal/services/auth"
+	"github.com/Grino777/sso/internal/storage"
 
 	sso_v1 "github.com/Grino777/sso-proto/gen/go/sso"
 	"google.golang.org/grpc"
@@ -72,6 +74,10 @@ func (s *AuthServer) Register(
 ) (*sso_v1.RegisterResponse, error) {
 	if req.Username == "" {
 		return nil, status.Error(codes.InvalidArgument, "username is required")
+	}
+
+	if strings.Contains(req.Username, " ") {
+		return nil, status.Error(codes.InvalidArgument, "username contains spaces")
 	}
 
 	if req.Password == "" {
