@@ -22,21 +22,28 @@ type SQLiteStorage struct {
 }
 
 // Creates a new DB session and performs migrations
-func New(driverName string, dbPath string, dbUser config.DBUser) *SQLiteStorage {
+func New(driverName string, dbPath string, dbUser config.DBUser) (*SQLiteStorage, error) {
+	const op = "sqlite.New"
+
+	storage := &SQLiteStorage{}
+
 	db, err := sql.Open(driverName, dbPath)
 	if err != nil {
-		panic("failed to connect to database: " + err.Error())
+		return nil, fmt.Errorf("%s: failed to connect to database: %v", op, err)
 	}
 
-	s := SQLiteStorage{
-		driverName: driverName,
-		db:         db,
+	storage.driverName = driverName
+	storage.db = db
+
+	if err := migrations.Migrate(storage.db, driverName); err != nil {
+		return nil, err
 	}
 
-	migrations.Migrate(s.db, driverName)
-	sUtils.CreateSuperUser(s.db, dbUser.User, dbUser.Password)
+	if err := sUtils.CreateSuperUser(storage.db, dbUser.User, dbUser.Password); err != nil {
+		return nil, fmt.Errorf("%s: %v", op, err)
+	}
 
-	return &s
+	return storage, nil
 }
 
 // Close DB session
@@ -47,9 +54,8 @@ func (s *SQLiteStorage) Close() error {
 
 func (s *SQLiteStorage) SaveUser(
 	ctx context.Context,
-	username string,
+	user *models.User,
 	passHash string,
-	// appID uint32,
 ) error {
 	const op = "storage.SaveUser"
 
@@ -58,7 +64,7 @@ func (s *SQLiteStorage) SaveUser(
 		return fmt.Errorf("%s: %w", op, err)
 	}
 
-	_, err = stmt.ExecContext(ctx, username, passHash)
+	_, err = stmt.ExecContext(ctx, user.Username, passHash)
 	if err != nil {
 		var sqlErr sqlite3.Error
 
@@ -80,23 +86,23 @@ func (s *SQLiteStorage) SaveUser(
 func (s *SQLiteStorage) GetUser(
 	ctx context.Context,
 	username string,
-	appID uint32,
-) (models.User, error) {
+) (*models.User, error) {
 	const op = "storage.sqlite.GetUser"
 
-	var user models.User
+	user := &models.User{}
 
 	query := "SELECT * FROM users WHERE username = ?"
 	err := s.db.QueryRowContext(ctx, query, username).Scan(
 		&user.ID,
 		&user.Username,
 		&user.PassHash,
+		&user.Role_id,
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return models.User{}, storage.ErrUserNotFound
+			return nil, storage.ErrUserNotFound
 		}
-		return models.User{}, fmt.Errorf("%s: %v", op, err)
+		return nil, fmt.Errorf("%s: %v", op, err)
 	}
 	return user, nil
 }
@@ -104,7 +110,11 @@ func (s *SQLiteStorage) GetUser(
 func (s *SQLiteStorage) GetApp(
 	ctx context.Context,
 	appID uint32,
-) (app models.App, err error) {
+) (app *models.App, err error) {
+	const op = "sqlite.GetApp"
+
+	app = &models.App{}
+
 	query := "SELECT * FROM apps WHERE id = ?"
 	err = s.db.QueryRowContext(ctx, query, appID).Scan(
 		&app.ID,
@@ -112,7 +122,10 @@ func (s *SQLiteStorage) GetApp(
 		&app.Secret,
 	)
 	if err != nil {
-		return models.App{}, err
+		if err == sql.ErrNoRows {
+			return nil, storage.ErrUserNotFound
+		}
+		return nil, fmt.Errorf("%s: %v", op, err)
 	}
 
 	return app, nil
@@ -121,7 +134,7 @@ func (s *SQLiteStorage) GetApp(
 // FIXME
 func (s *SQLiteStorage) IsAdmin(
 	ctx context.Context,
-	username string,
-) (isAdmin bool, err error) {
+	user *models.User,
+) (bool, error) {
 	panic("implement me")
 }

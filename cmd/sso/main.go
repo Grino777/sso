@@ -9,15 +9,19 @@ import (
 	"github.com/Grino777/sso/internal/app"
 	"github.com/Grino777/sso/internal/config"
 	"github.com/Grino777/sso/internal/lib/logger"
-	storageU "github.com/Grino777/sso/internal/utils/storage"
+	appUtils "github.com/Grino777/sso/internal/utils/app"
 
 	_ "github.com/mattn/go-sqlite3"
 )
 
 func main() {
-	storageU.CheckStorageFolder()
-	cfg := config.Load()
+
 	log := logger.New(os.Stdout, slog.LevelDebug)
+	cfg := config.Load(log)
+
+	if err := appUtils.CheckKeysFolder(cfg.KeysDir); err != nil {
+		panic(err.Error())
+	}
 
 	app := app.New(cfg, log)
 

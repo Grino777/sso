@@ -1,54 +1,137 @@
 package app
 
 import (
+	"fmt"
 	"log/slog"
 
 	grpcapp "github.com/Grino777/sso/internal/app/grpc"
 	"github.com/Grino777/sso/internal/config"
 	"github.com/Grino777/sso/internal/services/auth"
-	"github.com/Grino777/sso/internal/storage"
+	"github.com/Grino777/sso/internal/services/jwks"
 	redisApp "github.com/Grino777/sso/internal/storage/redis"
 	dbApp "github.com/Grino777/sso/internal/storage/sqlite"
+	storageU "github.com/Grino777/sso/internal/utils/storage"
 )
 
 type App struct {
 	Config       *config.Config
 	Logger       *slog.Logger
 	GRPCServer   *grpcapp.GRPCApp
-	DBStorage    storage.Storage
-	RedisStorage storage.Storage
+	DBStorage    *dbApp.SQLiteStorage
+	RedisStorage *redisApp.RedisStorage
+}
+
+type Services struct {
+	jwksService *jwks.JwksService
+	authService *auth.AuthService
+}
+
+func (s *Services) Auth() *auth.AuthService {
+	return s.authService
+}
+
+func (s *Services) Jwks() *jwks.JwksService {
+	return s.jwksService
 }
 
 func New(
-	cfg *config.Config,
+	// cfg *config.Config,
 	log *slog.Logger,
-) *App {
-	db := dbApp.New("sqlite3", cfg.DB.Storage_path, cfg.DBUser)
-	dbStorage := dbApp.ToStorage(db)
+) (*App, error) {
+	const op = "app.New"
 
-	redis := redisApp.New(cfg.Redis, log)
-	cacheStorage := redisApp.ToStorage(redis)
-
-	authService := auth.New(log, dbStorage, cacheStorage, cfg.TokenTTL)
-
-	grpcServer := grpcapp.New(log, authService, dbStorage, cacheStorage, int(cfg.GRPC.Port), cfg.Mode)
-
-	return &App{
-		Config:       cfg,
-		Logger:       log,
-		GRPCServer:   grpcServer,
-		DBStorage:    dbStorage,
-		RedisStorage: cacheStorage,
+	app := &App{Logger: log}
+	if err := loadConfig(app); err != nil {
+		return nil, fmt.Errorf("%s: %v", op, err)
+	} else {
+		log.Debug("%s: config loaded successfully")
 	}
+
+	if err := initDB(app); err != nil {
+		return nil, fmt.Errorf("%s: %v", op, err)
+	} else {
+		log.Debug("%s: db initialized successfully")
+	}
+
+	if err := initCache(app); err != nil {
+		return nil, fmt.Errorf("%s: %v", op, err)
+	} else {
+		log.Debug("%s: cache initialized successfully")
+	}
+
+	// publicKeys :=
+
+	jwksService := jwks.New(log)
+	authService := auth.New(log, db, redis, cfg.TokenTTL)
+
+	services := &Services{
+		jwksService: jwksService,
+		authService: authService,
+	}
+
+	grpcServer := grpcapp.New(log, services, db, redis, cfg)
+
+	return app, nil
+
+	// return &App{
+	// 	Config:       cfg,
+	// 	Logger:       log,
+	// 	GRPCServer:   grpcServer,
+	// 	DBStorage:    db,
+	// 	RedisStorage: redis,
+	// }, nil
 }
 
 func (a *App) Stop() {
-	const op = "app.app.Stop"
+	const op = "app.Stop"
 
 	log := a.Logger.With("op", op)
 
-	a.DBStorage.Closer.Close()
+	a.DBStorage.Close()
 	log.Debug("db session closed")
-	a.RedisStorage.Closer.Close()
+
+	a.RedisStorage.Close()
 	log.Debug("redis session closed")
+}
+
+func loadConfig(a *App) error {
+	const op = "app.loadConfig"
+
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("%s: %v", op, err)
+	}
+
+	a.Config = cfg
+	return nil
+}
+
+func initDB(a *App) error {
+	const op = "app.initDb"
+
+	if err := storageU.CheckStorageFolder(); err != nil {
+		return err
+	}
+
+	db, err := dbApp.New("sqlite3", a.Config.DB.Storage_path, a.Config.DBUser)
+	if err != nil {
+		return fmt.Errorf("%s: %v", op, err)
+	}
+
+	a.DBStorage = db
+
+	return nil
+}
+
+func initCache(a *App) error {
+	const op = "app.initCache"
+
+	redis, err := redisApp.New(a.Config.Redis, a.Logger)
+	if err != nil {
+		return fmt.Errorf("%s: %v", op, err)
+	}
+
+	a.RedisStorage = redis
+
+	return nil
 }

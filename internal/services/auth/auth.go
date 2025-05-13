@@ -3,7 +3,6 @@ package auth
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -13,6 +12,7 @@ import (
 	cjwt "github.com/Grino777/sso/internal/lib/jwt"
 	"github.com/Grino777/sso/internal/lib/logger"
 	"github.com/Grino777/sso/internal/storage"
+	authU "github.com/Grino777/sso/internal/utils/auth"
 
 	"golang.org/x/crypto/bcrypt"
 )
@@ -21,18 +21,63 @@ var (
 	ErrInvalidCredentials = errors.New("invalid credentials")
 )
 
+// ---------------------------------DB Interfaces----------------------------------
+
+type DBStorage interface {
+	DBUserProvider
+	DBAppProvider
+	Closer
+}
+
+type DBUserProvider interface {
+	SaveUser(ctx context.Context, user *models.User, passHash string) error
+	GetUser(ctx context.Context, username string) (*models.User, error)
+	IsAdmin(ctx context.Context, user *models.User) (bool, error)
+}
+
+type DBAppProvider interface {
+	GetApp(ctx context.Context, appID uint32) (*models.App, error)
+}
+
+type Closer interface {
+	Close() error
+}
+
+// -----------------------------------End Block------------------------------------
+
+// --------------------------------Cache Interfaces--------------------------------
+
+type CacheStorage interface {
+	CacheUserProvider
+	CacheAppProvider
+	Closer
+}
+
+type CacheUserProvider interface {
+	GetUser(ctx context.Context, user *models.User, app *models.App) (*models.User, error)
+	SaveUser(ctx context.Context, user *models.User, app *models.App) error
+	IsAdmin(ctx context.Context, user *models.User, app *models.App) (bool, error)
+}
+
+type CacheAppProvider interface {
+	GetApp(ctx context.Context, appID uint32) (*models.App, error)
+	SaveApp(ctx context.Context, app *models.App) error
+}
+
+// -----------------------------------End Block------------------------------------
+
 // Объект для взаимодейсвтия с БД
 type AuthService struct {
 	log      *slog.Logger
-	db       storage.Storage
-	cache    storage.Storage
+	db       DBStorage
+	cache    CacheStorage
 	tokenTTL time.Duration
 }
 
 func New(
 	log *slog.Logger,
-	db storage.Storage,
-	cache storage.Storage,
+	db DBStorage,
+	cache CacheStorage,
 	tokenTTL time.Duration,
 ) *AuthService {
 	return &AuthService{
@@ -48,7 +93,7 @@ func (s *AuthService) Login(
 	username string,
 	password string,
 	appID uint32,
-) (token string, err error) {
+) (*models.Token, error) {
 	const op = "services.auth.Login"
 
 	log := s.log.With(
@@ -56,38 +101,49 @@ func (s *AuthService) Login(
 		slog.String("username", username),
 	)
 
-	user, err := s.db.Users.GetUser(ctx, username, appID)
+	userObj, appObj, err := ValidateData(ctx, username, password, appID)
 	if err != nil {
-		if errors.Is(err, storage.ErrUserNotFound) {
-			log.Error("user not found", logger.Error(err))
+		log.Error("%s:%v", op, err)
+		return nil, err
+	}
 
-			return "", fmt.Errorf("%s: %w", op, ErrInvalidCredentials)
-		}
-
-		log.Error("failed to get user", logger.Error(err))
-
-		return "", fmt.Errorf("%s: %w", op, err)
+	user, err := GetCachedUser(ctx, s.db, s.cache, userObj, appObj)
+	if err != nil {
+		log.Error("%s: %w", op, err)
+		return nil, fmt.Errorf("%s: %w", op, err)
 	}
 
 	if err := bcrypt.CompareHashAndPassword(user.PassHash, []byte(password)); err != nil {
-		log.Error("invalid credentials", logger.Error(err))
-
-		return "", fmt.Errorf("%s: %w", op, err)
+		if errors.Is(err, bcrypt.ErrMismatchedHashAndPassword) {
+			log.Error("invalid credentials", logger.Error(err))
+			return nil, ErrInvalidCredentials
+		}
+		log.Error("%s:%w", op, err)
+		return nil, fmt.Errorf("%s: %w", op, err)
 	}
 
-	app, err := s.db.Apps.GetApp(ctx, appID)
+	app, err := GetCachedApp(ctx, s.db, s.cache, appID)
 	if err != nil {
-		return "", fmt.Errorf("%s: %w", op, err)
+		log.Error("%s: %w", op, err)
+		return nil, fmt.Errorf("%s: %w", op, err)
 	}
 
-	log.Info("logged is successfully", slog.String("username", username))
-
-	tokenString, err := cjwt.NewToken(user, app, s.tokenTTL)
+	tokenObj, err := cjwt.NewAccessToken(user, app, s.tokenTTL)
 	if err != nil {
-		return "", err
+		log.Error("%s: %w", op, err)
+		return nil, err
+	}
+	user.Token = tokenObj
+
+	err = s.cache.SaveUser(ctx, user, app)
+	if err != nil {
+		log.Error("%s: %w", op, err)
+		return nil, err
 	}
 
-	return tokenString, nil
+	log.Info("logged is successfully")
+
+	return tokenObj, nil
 
 }
 
@@ -103,16 +159,30 @@ func (s *AuthService) Register(
 		slog.String("username", username),
 	)
 
-	log.Info("registering user")
-
-	passHash, err := createPassHash(password)
+	_, err := s.db.GetUser(ctx, username)
 	if err != nil {
-		log.Error("failed to generate pass hash", "user", username)
+		if !errors.Is(err, storage.ErrUserNotFound) {
+			log.Error("%s:%v", op, err)
+			return err
+		}
+	} else {
+		log.Debug("user already exist")
+		return storage.ErrUserExist
+	}
 
+	user, err := ValidateUser(username, password)
+	if err != nil {
+		log.Error("%s:%v", op, err)
+		return err
+	}
+
+	passHash, err := authU.CreatePassHash(user.Password)
+	if err != nil {
+		log.Error("failed to generate pass hash %v", logger.Error(err))
 		return fmt.Errorf("%s: %v", op, err)
 	}
 
-	err = s.db.Users.SaveUser(ctx, username, passHash)
+	err = s.db.SaveUser(ctx, user, passHash)
 	if err != nil {
 		log.Error("failed to save user", logger.Error(err))
 
@@ -137,27 +207,25 @@ func (s *AuthService) IsAdmin(
 	panic("implement me")
 }
 
-func (s *AuthService) GetApp(
+// FIXME
+func (s *AuthService) RefreshToken(
 	ctx context.Context,
-	appID uint32,
-) (models.App, error) {
-	app, err := s.db.Apps.GetApp(ctx, appID)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			s.log.Error("record not found", "appID", appID)
-
-			return models.App{}, err
-		}
-	}
-	return app, nil
+	token, expired_at string,
+) (*models.Token, error) {
+	panic("implement me")
 }
 
-func createPassHash(pass string) (string, error) {
-	const op = "services.auth.createPassHash"
+// func (s *AuthService) GetApp(
+// 	ctx context.Context,
+// 	appID uint32,
+// ) (models.App, error) {
+// 	app, err := s.db.GetApp(ctx, appID)
+// 	if err != nil {
+// 		if errors.Is(err, sql.ErrNoRows) {
+// 			s.log.Error("record not found", "appID", appID)
 
-	passHash, err := bcrypt.GenerateFromPassword([]byte(pass), bcrypt.DefaultCost)
-	if err != nil {
-		return "", fmt.Errorf("%s: %v", op, err)
-	}
-	return string(passHash), nil
-}
+// 			return models.App{}, err
+// 		}
+// 	}
+// 	return app, nil
+// }

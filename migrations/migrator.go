@@ -3,6 +3,7 @@ package migrations
 import (
 	"database/sql"
 	"embed"
+	"fmt"
 
 	"github.com/pressly/goose/v3"
 )
@@ -11,15 +12,17 @@ import (
 var embedMigrations embed.FS
 
 // Performs migrations
-func Migrate(db *sql.DB, driverName string) {
+func Migrate(db *sql.DB, driverName string) error {
+	const op = "migrations.Migrate"
 
 	goose.SetBaseFS(embedMigrations)
 
 	if err := goose.SetDialect("sqlite3"); err != nil {
-		panic("failed to set dialect: " + err.Error())
+		return fmt.Errorf("%s: failed to set dialect: %v", op, err)
 	}
 
 	if err := goose.Up(db, driverName); err != nil {
-		panic("failed to apply migrations: " + err.Error())
+		return fmt.Errorf("%s: failed to apply migrations: %v", op, err)
 	}
+	return nil
 }

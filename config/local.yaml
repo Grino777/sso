@@ -6,6 +6,7 @@ grpc:
   port: 8088
   timeout: 5s
 tokenTTL: 1h
+refreshTokenTTL: 7d
 redis:
     addr: "127.0.0.1:6379"
     password: ""
@@ -14,3 +15,4 @@ redis:
     max_retries: 5
     dial_timeout: 10s
     timeout: 5s
+    tokenTTL: 1h

@@ -6,8 +6,11 @@ import (
 	"log/slog"
 	"net"
 
-	grpcauth "github.com/Grino777/sso/internal/grpc/server"
-	"github.com/Grino777/sso/internal/storage"
+	"github.com/Grino777/sso/internal/config"
+	grpcauth "github.com/Grino777/sso/internal/grpc/auth"
+	grpcjwks "github.com/Grino777/sso/internal/grpc/jwks"
+	"github.com/Grino777/sso/internal/services/auth"
+	"github.com/Grino777/sso/internal/services/jwks"
 
 	"github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/logging"
 	"github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/recovery"
@@ -15,6 +18,11 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
+
+type Services interface {
+	Auth() *auth.AuthService
+	Jwks() *jwks.JwksService
+}
 
 // Объект приложения для управления GRPC сервром
 type GRPCApp struct {
@@ -26,11 +34,10 @@ type GRPCApp struct {
 
 func New(
 	log *slog.Logger,
-	authService grpcauth.AuthService,
-	dbstore storage.Storage,
-	redisstore storage.Storage,
-	port int,
-	mode string,
+	services Services,
+	db auth.DBStorage,
+	cache auth.CacheStorage,
+	cfg *config.Config,
 ) *GRPCApp {
 
 	loggingOpts := []logging.Option{
@@ -48,16 +55,17 @@ func New(
 	gRPCServer := grpc.NewServer(grpc.ChainUnaryInterceptor(
 		recovery.UnaryServerInterceptor(recoverOptions...),
 		logging.UnaryServerInterceptor(InterceptorLogger(log), loggingOpts...),
-		HMACInterceptor(log, dbstore, mode),
+		HMACInterceptor(log, db, cache, cfg.Mode),
 	))
 
-	grpcauth.RegServer(gRPCServer, authService)
+	grpcauth.RegServer(gRPCServer, services.Auth())
+	grpcjwks.RegService(gRPCServer, services.Jwks())
 
 	return &GRPCApp{
 		log:        log,
 		gRPCServer: gRPCServer,
-		port:       port,
-		mode:       mode,
+		port:       int(cfg.GRPC.Port),
+		mode:       cfg.Mode,
 	}
 }
 

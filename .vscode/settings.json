@@ -16,5 +16,9 @@
         "diffEditor.ignoreTrimWhitespace": false,
         "editor.defaultColorDecorators": "never",
         "editor.defaultFormatter": "redhat.vscode-yaml"
+    },
+    "go.formatTool": "goimports",
+    "[go]": {
+        "editor.formatOnSave": true
     }
 }
