@@ -4,8 +4,8 @@
         {
             "previewLimit": 50,
             "driver": "SQLite",
-            "database": "${workspaceFolder:sso-app}/storage/sso.sqlite3",
-            "name": "SSO"
+            "name": "SSO",
+            "database": "storage/sso.sqlite3"
         }
     ],
     "editor.wordWrap": "on",
