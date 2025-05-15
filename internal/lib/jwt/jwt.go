@@ -36,19 +36,19 @@ func NewAccessToken(user *models.User, app *models.App, d time.Duration) (*model
 	return tObj, nil
 }
 
-func NewRefreshToken(
-	user models.User,
-	app models.App,
-	d time.Duration,
-) (models.Token, error) {
-	tokenObj := &models.Token{}
-	expire_at := time.Now().UTC().Add(d).Unix()
+// func NewRefreshToken(
+// 	user models.User,
+// 	app models.App,
+// 	d time.Duration,
+// ) (models.Token, error) {
+// 	tokenObj := &models.Token{}
+// 	expire_at := time.Now().UTC().Add(d).Unix()
 
-	token := jwt.New(jwt.SigningMethodHS256)
-	claims := token.Claims.(jwt.MapClaims)
-	claims["user_id"] = user.ID
-	claims["app_id"] = app.ID
-	claims["exp"] = expire_at
+// 	token := jwt.New(jwt.SigningMethodHS256)
+// 	claims := token.Claims.(jwt.MapClaims)
+// 	claims["user_id"] = user.ID
+// 	claims["app_id"] = app.ID
+// 	claims["exp"] = expire_at
 
-	ts, err := token.SignedString()
-}
+// 	ts, err := token.SignedString()
+// }

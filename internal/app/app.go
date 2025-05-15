@@ -35,51 +35,34 @@ func (s *Services) Jwks() *jwks.JwksService {
 }
 
 func New(
-	// cfg *config.Config,
 	log *slog.Logger,
 ) (*App, error) {
 	const op = "app.New"
 
 	app := &App{Logger: log}
+
 	if err := loadConfig(app); err != nil {
 		return nil, fmt.Errorf("%s: %v", op, err)
-	} else {
-		log.Debug("%s: config loaded successfully")
 	}
+
+	// FIXME
+	// keys, err := loadKeys(app)
+	// if err != nil {
+	// 	return nil, fmt.Errorf("%s: %v", op, err)
+	// }
 
 	if err := initDB(app); err != nil {
 		return nil, fmt.Errorf("%s: %v", op, err)
-	} else {
-		log.Debug("%s: db initialized successfully")
 	}
 
 	if err := initCache(app); err != nil {
 		return nil, fmt.Errorf("%s: %v", op, err)
-	} else {
-		log.Debug("%s: cache initialized successfully")
 	}
 
-	// publicKeys :=
-
-	jwksService := jwks.New(log)
-	authService := auth.New(log, db, redis, cfg.TokenTTL)
-
-	services := &Services{
-		jwksService: jwksService,
-		authService: authService,
-	}
-
-	grpcServer := grpcapp.New(log, services, db, redis, cfg)
+	services := initServices(app)
+	initGRPCServer(app, services)
 
 	return app, nil
-
-	// return &App{
-	// 	Config:       cfg,
-	// 	Logger:       log,
-	// 	GRPCServer:   grpcServer,
-	// 	DBStorage:    db,
-	// 	RedisStorage: redis,
-	// }, nil
 }
 
 func (a *App) Stop() {
@@ -94,32 +77,20 @@ func (a *App) Stop() {
 	log.Debug("redis session closed")
 }
 
-func loadConfig(a *App) error {
-	const op = "app.loadConfig"
-
-	cfg, err := config.Load()
-	if err != nil {
-		return fmt.Errorf("%s: %v", op, err)
-	}
-
-	a.Config = cfg
-	return nil
-}
-
 func initDB(a *App) error {
-	const op = "app.initDb"
+	const op = "grpc.app.initDb"
 
 	if err := storageU.CheckStorageFolder(); err != nil {
 		return err
 	}
 
-	db, err := dbApp.New("sqlite3", a.Config.DB.Storage_path, a.Config.DBUser)
+	db, err := dbApp.New("sqlite3", a.Config.DB.StoragePath, a.Config.DBUser)
 	if err != nil {
 		return fmt.Errorf("%s: %v", op, err)
 	}
 
 	a.DBStorage = db
-
+	a.Logger.Debug("db initialized successfully", slog.String("op", op))
 	return nil
 }
 
@@ -132,6 +103,52 @@ func initCache(a *App) error {
 	}
 
 	a.RedisStorage = redis
-
+	a.Logger.Debug("cache initialized successfully", slog.String("op", op))
 	return nil
 }
+
+func initGRPCServer(a *App, s *Services) {
+	grpcServer := grpcapp.New(a.Logger, s, a.DBStorage, a.RedisStorage, a.Config)
+	a.GRPCServer = grpcServer
+	a.Logger.Debug("gRPC server initialized")
+}
+
+func initServices(a *App) *Services {
+	jwksService := jwks.New(a.Logger)
+	authService := auth.New(a.Logger, a.DBStorage, a.RedisStorage, a.Config.TokenTTL)
+
+	return &Services{
+		jwksService: jwksService,
+		authService: authService,
+	}
+}
+
+func loadConfig(a *App) error {
+	const op = "app.loadConfig"
+
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("%s: %v", op, err)
+	}
+
+	a.Config = cfg
+	a.Logger.Debug("config loaded successfully", slog.String("op", op))
+	return nil
+}
+
+// func loadKeys(a *App) (*types.KeysType, error) {
+// 	const op = "app.loadKeys"
+
+// 	if err := appUtils.CheckKeysFolder(a.Config.KeysDir); err != nil {
+// 		return nil, fmt.Errorf("%s: %v", op, err)
+// 	}
+
+// 	keys, err := appUtils.LoadKeys(a.Config.KeysDir)
+// 	if err != nil {
+// 		return nil, fmt.Errorf("%s: %v", op, err)
+// 	}
+
+// 	a.Logger.Debug("%s: keys loaded successfully", op)
+
+// 	return keys, nil
+// }

@@ -28,4 +28,4 @@ storage/sso.sqlite3
 *__debug_*
 
 # Private & Public Keys
-keys
+/keys

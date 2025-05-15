@@ -2,26 +2,39 @@ package jwks
 
 import (
 	"context"
-	"crypto/rsa"
 	"log/slog"
 
 	"github.com/Grino777/sso-proto/gen/go/sso"
 )
 
+// type PublicKeys interface {
+// 	AddPublicKeys() error
+// 	DeletePublicKeys() error
+// }
+
+// type Keys interface {
+// 	PublicKeys
+// 	Load() error
+// 	PublicKeys() error
+// }
+
+type KeysStore struct {
+}
+
 type JwksService struct {
 	sso.UnimplementedJwksServer
-	log        *slog.Logger
-	publicKeys map[string]*rsa.PublicKey
+	log  *slog.Logger
+	keys KeysStore
 }
 
 func New(
 	log *slog.Logger,
-	publicKeys map[string]*rsa.PublicKey,
 ) *JwksService {
-	return &JwksService{
-		log:        log,
-		publicKeys: publicKeys,
-	}
+	panic("implement me!")
+	// return &JwksService{
+	// 	log:        log,
+	// 	publicKeys: publicKeys,
+	// }
 }
 
 // FIXME

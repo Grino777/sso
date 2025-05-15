@@ -4,189 +4,159 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"path"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/ilyakaznacheev/cleanenv"
 	"github.com/joho/godotenv"
 )
 
+// Константы для режимов окружения
 const (
-	// Environment modes
 	EnvLocal = "local"
 	EnvDev   = "dev"
 	EnvProd  = "prod"
-
-	// Config file paths
-	localConfig = "config/local.yaml"
-	devConfig   = "config/dev.yaml"
-	prodConfig  = "config/prod.yaml"
-
-	// Environment variables
-	db_user = "DB_USER"
-	db_pass = "DB_PASSWORD"
-	keysDir = "KEYS_DIR"
 )
 
-var (
-	envVariables = []string{db_user, db_pass, keysDir}
-	envMappings  = map[string]func(*Config, string){
-		db_user: func(c *Config, v string) { c.DBUser.User = v },
-		db_pass: func(c *Config, v string) { c.DBUser.Password = v },
-		keysDir: func(c *Config, v string) { c.KeysDir = v },
-	}
+// Константы для путей к конфигурационным файлам
+const (
+	localConfigPath = "config/local.yaml"
+	devConfigPath   = "config/dev.yaml"
+	prodConfigPath  = "config/prod.yaml"
 )
 
+// Константы для переменных окружения
+const (
+	dbUserEnv  = "DB_USER"
+	dbPassEnv  = "DB_PASSWORD"
+	keysDirEnv = "KEYS_DIR"
+)
+
+// Config представляет конфигурацию приложения.
 type Config struct {
-	Mode            string
+	Mode            string        // Режим работы приложения (local, dev, prod)
 	DB              DBConfig      `yaml:"db" env-required:"true"`
 	Redis           RedisConfig   `yaml:"redis" env-required:"true"`
 	GRPC            GRPCConfig    `yaml:"grpc" env-required:"true"`
 	TokenTTL        time.Duration `yaml:"tokenTTL" env-default:"1h"`
-	RefreshTokenTTL time.Duration `yaml:"refreshTokenTTL" env-default:"7d"`
+	RefreshTokenTTL time.Duration `yaml:"refreshTokenTTL" env-default:"168h"`
 	DBUser          DBUser
 	BaseDir         string
 	KeysDir         string
 }
 
+// DBUser содержит учетные данные для подключения к базе данных.
 type DBUser struct {
 	User     string
 	Password string
 }
 
+// DBConfig содержит настройки базы данных.
 type DBConfig struct {
-	Storage_path string `yaml:"storage_path" env-required:"true"`
+	StoragePath string `yaml:"storage_path" env-required:"true"`
 }
 
+// GRPCConfig содержит настройки gRPC-сервера.
 type GRPCConfig struct {
-	Url     string        `yaml:"url" env-required:"true"`
+	URL     string        `yaml:"url" env-required:"true"`
 	Port    uint16        `yaml:"port" env-required:"true"`
 	Timeout time.Duration `yaml:"timeout" env-default:"5s"`
 }
 
+// RedisConfig содержит настройки Redis.
 type RedisConfig struct {
-	Addr        string        `yaml:"addr" default:"127.0.0.1:6379"`
+	Addr        string        `yaml:"addr" env-default:"127.0.0.1:6379"`
 	Password    string        `yaml:"password"`
 	User        string        `yaml:"user"`
-	DB          int           `yaml:"db" default:"0"`
-	MaxRetries  int           `yaml:"max_retries" default:"5"`
-	DialTimeout time.Duration `yaml:"dial_timeout" default:"10"`
-	Timeout     time.Duration `yaml:"timeout" default:"5"`
-	TokenTTL    time.Duration `yaml:"tokenTTL" default:"1h"`
+	DB          int           `yaml:"db" env-default:"0"`
+	MaxRetries  int           `yaml:"max_retries" env-default:"5"`
+	DialTimeout time.Duration `yaml:"dial_timeout" env-default:"10s"`
+	Timeout     time.Duration `yaml:"timeout" env-default:"5s"`
+	TokenTTL    time.Duration `yaml:"tokenTTL" env-default:"1h"`
 }
 
-// Загрузка конфигураций и .env для App
+var envMapping = map[string]func(*Config, string){
+	dbUserEnv:  func(c *Config, v string) { c.DBUser.User = v },
+	dbPassEnv:  func(c *Config, v string) { c.DBUser.Password = v },
+	keysDirEnv: func(c *Config, v string) { c.KeysDir = v },
+}
+
+var (
+	// Глобальные переменные для кэширования конфигурации
+	config    *Config
+	configErr error
+	once      sync.Once
+	flagSet   *flag.FlagSet
+	mode      string
+)
+
+func init() {
+	flagSet = flag.NewFlagSet("sso", flag.ContinueOnError)
+	flagSet.StringVar(&mode, "mode", "", "application mode (local, dev, prod)")
+}
+
+// Load загружает конфигурацию приложения из флагов, переменных окружения и YAML-файла.
+// Вызывается однократно благодаря sync.Once.
 func Load() (*Config, error) {
 	const op = "config.Load"
 
-	cfg := &Config{}
+	once.Do(func() {
+		config, configErr = loadConfig()
+	})
 
-	cfg, err := mustParseConfig()
-	if err != nil {
-		return nil, fmt.Errorf("%s: failed to load config: %v", op, err)
+	if configErr != nil {
+		return nil, fmt.Errorf("%s: %w", op, configErr)
 	}
 
-	return cfg, nil
+	return config, nil
 }
 
-func mustParseConfig() (*Config, error) {
-	const op = "config.mustParseConfig"
+func loadConfig() (*Config, error) {
+	const op = "config.loadConfig"
 
 	cfg := &Config{}
 
+	if err := flagSet.Parse(os.Args[1:]); err != nil {
+		return nil, fmt.Errorf("%s: failed to parse flags: %w", op, err)
+	}
+
+	if mode == "" {
+		return nil, fmt.Errorf("%s: mode not specified", op)
+	}
+	cfg.Mode = mode
+
 	if err := godotenv.Load(); err != nil {
-		return nil, fmt.Errorf("%s: %v", op, err)
+		return nil, fmt.Errorf("%s: failed to load .env file: %w", op, err)
 	}
 
-	cfgPath, err := resolveConfigPath()
+	configPath, err := configPath(cfg.Mode)
 	if err != nil {
-		return nil, fmt.Errorf("%s: %v", op, err)
+		return nil, fmt.Errorf("%s: %w", op, err)
 	}
 
-	_, err = os.Stat(cfgPath)
-	if err != nil {
+	if _, err := os.Stat(configPath); err != nil {
 		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("%s: config file does not exist '%s': %v", op, cfgPath, err)
+			return nil, fmt.Errorf("%s: config file does not exist: %s", op, configPath)
 		}
-		return nil, fmt.Errorf("%s: cannot stat config file: %v", op, err)
+		return nil, fmt.Errorf("%s: cannot stat config file: %w", op, err)
 	}
 
-	if err := cleanenv.ReadConfig(cfgPath, &cfg); err != nil {
-		return nil, fmt.Errorf("%s: cannot read config: %v", op, err)
+	if err := cleanenv.ReadConfig(configPath, cfg); err != nil {
+		return nil, fmt.Errorf("%s: failed to read config file: %w", op, err)
 	}
 
 	if err := parseEnv(cfg); err != nil {
-		return nil, fmt.Errorf("%s: failed to parse environment variables: %v", op, err)
+		return nil, fmt.Errorf("%s: failed to parse environment variables: %w", op, err)
 	}
 
-	if err := getBaseDir(cfg); err != nil {
-		return nil, fmt.Errorf("%s: failed to get base directory: %v", op, err)
+	if err := setBaseDir(cfg, configPath); err != nil {
+		return nil, fmt.Errorf("%s: %w", op, err)
 	}
 
-	getKeysDir(cfg)
+	setKeysDir(cfg)
 
 	return cfg, nil
-
-}
-
-func resolveConfigPath() (string, error) {
-	const op = "config.getPath"
-
-	m, err := parseMode()
-	if err != nil {
-		return "", fmt.Errorf("%s: %v", op, err)
-	}
-
-	configPath, err := configPath(m)
-	if err != nil {
-		return "", fmt.Errorf("%s: %v", op, err)
-	}
-
-	return configPath, nil
-}
-
-func parseEnv(cfg *Config) error {
-	const op = "config.parseEnv"
-
-	for _, envKey := range envVariables {
-		value, err := getEnvValue(envKey)
-		if err != nil {
-			return fmt.Errorf("%s: %v", op, err)
-		}
-		setter, ok := envMappings[envKey]
-		if !ok {
-			return fmt.Errorf("%s: no mapping for environment variable: %s", op, envKey)
-		}
-		setter(cfg, value)
-	}
-	return nil
-}
-
-func getEnvValue(key string) (string, error) {
-	const op = "config.parseEnvValue"
-
-	res := os.Getenv(key)
-	if res != "" {
-		return res, nil
-	}
-
-	return "", fmt.Errorf("%s: not specifed in env `%s`", op, res)
-}
-
-func parseMode() (string, error) {
-	const op = "config.parseMode"
-
-	var res string
-
-	flag.StringVar(&res, "mode", "", "app mode")
-	flag.Parse()
-
-	if res == "" {
-		return "", fmt.Errorf("%s: 'mode' was not specified", op)
-	}
-
-	return res, nil
 }
 
 func configPath(mode string) (string, error) {
@@ -194,36 +164,51 @@ func configPath(mode string) (string, error) {
 
 	switch mode {
 	case EnvLocal:
-		return localConfig, nil
+		return localConfigPath, nil
 	case EnvDev:
-		return devConfig, nil
+		return devConfigPath, nil
 	case EnvProd:
-		return prodConfig, nil
+		return prodConfigPath, nil
 	default:
-		return "", fmt.Errorf("%s: incorrect mode: %s", op, mode)
+		return "", fmt.Errorf("%s: invalid mode: %s", op, mode)
 	}
 }
 
-func getBaseDir(c *Config) error {
-	const op = "config.getBaseDir"
+func parseEnv(cfg *Config) error {
+	const op = "config.parseEnv"
 
-	configPath, err := resolveConfigPath()
-	if err != nil {
-		return fmt.Errorf("%s: %v", op, err)
+	for envKey, setter := range envMapping {
+		value, err := getEnvValue(envKey)
+		if err != nil {
+			return fmt.Errorf("%s: %w", op, err)
+		}
+		setter(cfg, value)
 	}
-
-	absPath, err := filepath.Abs(configPath)
-	if err != nil {
-		return fmt.Errorf("%s: cannot get absolute path: %v", op, err)
-	}
-
-	baseDir := filepath.Dir(filepath.Dir(absPath))
-	c.BaseDir = baseDir
-
 	return nil
 }
 
-func getKeysDir(c *Config) {
-	path := path.Join(c.BaseDir, "keys")
-	c.KeysDir = path
+func getEnvValue(key string) (string, error) {
+	const op = "config.getEnvValue"
+
+	value := os.Getenv(key)
+	if value == "" {
+		return "", fmt.Errorf("%s: environment variable %s not set", op, key)
+	}
+	return value, nil
+}
+
+func setBaseDir(cfg *Config, configPath string) error {
+	const op = "config.setBaseDir"
+
+	absPath, err := filepath.Abs(configPath)
+	if err != nil {
+		return fmt.Errorf("%s: cannot get absolute path: %w", op, err)
+	}
+
+	cfg.BaseDir = filepath.Dir(filepath.Dir(absPath))
+	return nil
+}
+
+func setKeysDir(cfg *Config) {
+	cfg.KeysDir = filepath.Join(cfg.BaseDir, "keys")
 }
