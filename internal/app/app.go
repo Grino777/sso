@@ -114,13 +114,34 @@ func initGRPCServer(a *App, s *Services) {
 }
 
 func initServices(a *App) *Services {
-	jwksService := jwks.New(a.Logger)
+	const op = "app.initServices"
+
+	jwksService, err := initJwksService(a)
+	if err != nil {
+		a.Logger.Warn(
+			"jwks service not initialized",
+			slog.String("op", op),
+			slog.String("error", err.Error()),
+		)
+		panic("jwks service not initialized")
+	}
+
 	authService := auth.New(a.Logger, a.DBStorage, a.RedisStorage, a.Config.TokenTTL)
 
 	return &Services{
 		jwksService: jwksService,
 		authService: authService,
 	}
+}
+
+func initJwksService(a *App) (*jwks.JwksService, error) {
+	const op = "app.initJwksService"
+
+	jwksService, err := jwks.New(a.Logger, a.Config.KeysDir, a.Config.TokenTTL)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %v", op, err)
+	}
+	return jwksService, nil
 }
 
 func loadConfig(a *App) error {

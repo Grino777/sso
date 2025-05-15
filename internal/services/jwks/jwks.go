@@ -2,39 +2,36 @@ package jwks
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/Grino777/sso-proto/gen/go/sso"
+	"github.com/Grino777/sso/internal/services/jwks/keys"
 )
-
-// type PublicKeys interface {
-// 	AddPublicKeys() error
-// 	DeletePublicKeys() error
-// }
-
-// type Keys interface {
-// 	PublicKeys
-// 	Load() error
-// 	PublicKeys() error
-// }
-
-type KeysStore struct {
-}
 
 type JwksService struct {
 	sso.UnimplementedJwksServer
-	log  *slog.Logger
-	keys KeysStore
+	log       *slog.Logger
+	keysStore *keys.KeysStore
 }
 
 func New(
 	log *slog.Logger,
-) *JwksService {
-	panic("implement me!")
-	// return &JwksService{
-	// 	log:        log,
-	// 	publicKeys: publicKeys,
-	// }
+	keysDir string,
+	tokenTTL time.Duration,
+) (*JwksService, error) {
+	const op = "jwks.New"
+
+	ks, err := keys.New(log, keysDir, tokenTTL)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %v", op, err)
+	}
+
+	return &JwksService{
+		log:       log,
+		keysStore: ks,
+	}, nil
 }
 
 // FIXME
