@@ -1,13 +1,16 @@
 package keys
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/pem"
 	"errors"
 	"fmt"
 	"log/slog"
+	"math/big"
 	"os"
 	"path"
 	"path/filepath"
@@ -18,6 +21,8 @@ import (
 	"github.com/google/uuid"
 )
 
+const opString = "jwks.keys.utils."
+
 var (
 	errKeyNotExist = errors.New("private key not exist")
 )
@@ -25,28 +30,28 @@ var (
 // ----------------------------------Init Block---------------------------------
 
 func initKeys(ks *KeysStore) error {
-	const op = "jwks.keys.initKeys"
+	const op = opString + "initKeys"
 
 	if err := loadKeys(ks); err != nil {
-		return fmt.Errorf("%s: %v", op, err)
+		return fmt.Errorf("%s: %w", op, err)
 	}
 	return nil
 }
 
 func loadKeys(ks *KeysStore) error {
-	const op = "jwks.keys.loadKeys"
+	const op = opString + "loadKeys"
 
 	if err := checkKeysFolder(ks); err != nil {
-		return fmt.Errorf("%s: %v", op, err)
+		return fmt.Errorf("%s: %w", op, err)
 	}
 
 	privateKey, err := retrievePrivateKey(ks)
 	if err != nil {
-		return fmt.Errorf("%s: %v", op, err)
+		return fmt.Errorf("%s: %w", op, err)
 	}
 
 	if err := setPrivateKey(ks, privateKey); err != nil {
-		return fmt.Errorf("%s: %v", op, err)
+		return fmt.Errorf("%s: %w", op, err)
 	}
 
 	return nil
@@ -57,25 +62,21 @@ func loadKeys(ks *KeysStore) error {
 // ------------------------------Private Key Block------------------------------
 
 func retrievePrivateKey(ks *KeysStore) (*models.PrivateKey, error) {
-	const op = "jwks.keys.getPrivateKey"
-
-	var privateKey *models.PrivateKey
+	const op = opString + "retrievePrivateKey"
 
 	privateKey, err := getLatestPrivateKey(ks)
 	if err != nil {
-		return nil, fmt.Errorf("%s: %v", op, err)
+		return nil, err
 	}
-
-	if err := deletePublicKeys(ks); err != nil {
-		return nil, fmt.Errorf("%s: %v", op, err)
+	if err := deletePublicKeysFiles(ks); err != nil {
+		return nil, fmt.Errorf("%s: %w", op, err)
 	}
-
 	ks.Log.Debug("private key successfully received", slog.String("op", op))
 	return privateKey, nil
 }
 
 func getLatestPrivateKey(ks *KeysStore) (*models.PrivateKey, error) {
-	const op = "utils.jwks.GetPrivateKey"
+	const op = opString + "getLatestPrivateKey"
 
 	pemFiles, err := listPrivateKeysFiles(ks.KeysDir)
 	if errors.Is(err, errKeyNotExist) {
@@ -85,19 +86,42 @@ func getLatestPrivateKey(ks *KeysStore) (*models.PrivateKey, error) {
 		}
 		return privateKey, nil
 	} else if err != nil {
-		return nil, fmt.Errorf("%s: %v", op, err)
+		return nil, fmt.Errorf("%s: %w", op, err)
 	}
 
-	latestKey, err := findLatestKey(ks, pemFiles)
+	latestKey, err := findLatestPrivateKey(ks, pemFiles)
 	if err != nil {
-		return nil, fmt.Errorf("%s: %v", op, err)
+		return nil, fmt.Errorf("%s: %w", op, err)
 	}
 
 	return latestKey, nil
 }
 
-func findLatestKey(ks *KeysStore, pemFiles []os.DirEntry) (*models.PrivateKey, error) {
-	const op = "jwks.keys.utils.latestKey"
+func deleteOldPrivateKeys(ks *KeysStore, pemFiles []os.DirEntry) error {
+	const op = opString + "deleteOldPrivateKeys"
+
+	for _, entry := range pemFiles[1:] {
+		keyID := filepath.Base(entry.Name())
+		if ext := filepath.Ext(keyID); ext != "" {
+			keyID = keyID[:len(keyID)-len(ext)]
+		}
+		ks.mu.Lock()
+		delete(ks.PrivateKeys, keyID)
+		defer ks.mu.Unlock()
+		oldKeyPath := filepath.Join(ks.KeysDir, entry.Name())
+		if err := os.Remove(oldKeyPath); err != nil {
+			return fmt.Errorf("%s: failed to remove old key %s: %w", op, oldKeyPath, err)
+		}
+	}
+	return nil
+}
+
+func findLatestPrivateKey(ks *KeysStore, pemFiles []os.DirEntry) (*models.PrivateKey, error) {
+	const op = opString + "findLatestPrivateKey"
+
+	if len(pemFiles) == 0 {
+		return nil, errKeyNotExist
+	}
 
 	sort.Slice(pemFiles, func(i, j int) bool {
 		infoI, _ := pemFiles[i].Info()
@@ -105,10 +129,10 @@ func findLatestKey(ks *KeysStore, pemFiles []os.DirEntry) (*models.PrivateKey, e
 		return infoI.ModTime().After(infoJ.ModTime())
 	})
 
-	latestKeyPath := path.Join(ks.KeysDir, pemFiles[0].Name())
+	latestKeyPath := filepath.Join(ks.KeysDir, pemFiles[0].Name())
 	privatePEM, err := os.ReadFile(latestKeyPath)
 	if err != nil {
-		return nil, fmt.Errorf("%s: failed to read private key %s: %v", op, latestKeyPath, err)
+		return nil, fmt.Errorf("%s: failed to read private key %s: %w", op, latestKeyPath, err)
 	}
 	privateBlock, _ := pem.Decode(privatePEM)
 	if privateBlock == nil {
@@ -116,7 +140,7 @@ func findLatestKey(ks *KeysStore, pemFiles []os.DirEntry) (*models.PrivateKey, e
 	}
 	privateKey, err := x509.ParsePKCS1PrivateKey(privateBlock.Bytes)
 	if err != nil {
-		return nil, fmt.Errorf("%s: failed to parse private key: %v", op, err)
+		return nil, fmt.Errorf("%s: failed to parse private key: %w", op, err)
 	}
 
 	keyID := filepath.Base(pemFiles[0].Name())
@@ -124,116 +148,126 @@ func findLatestKey(ks *KeysStore, pemFiles []os.DirEntry) (*models.PrivateKey, e
 		keyID = keyID[:len(keyID)-len(ext)]
 	}
 
-	for _, entry := range pemFiles[1:] {
-		oldKeyPath := path.Join(ks.KeysDir, entry.Name())
-		if ext := filepath.Ext(keyID); ext != "" {
-			keyID = keyID[:len(keyID)-len(ext)]
-		}
-		delete(ks.PrivateKeys, keyID)
-		if err := os.Remove(oldKeyPath); err != nil {
-			return nil, fmt.Errorf("%s: failed to remove old key %s: %v", op, oldKeyPath, err)
-		}
+	if err := deleteOldPrivateKeys(ks, pemFiles); err != nil {
+		return nil, err
 	}
 
 	return &models.PrivateKey{
-		ID:  keyID,
-		Key: privateKey,
+		ID:      keyID,
+		Key:     privateKey,
+		IsSaved: true,
 	}, nil
 }
 
 func generatePrivateKey(ks *KeysStore) (*models.PrivateKey, error) {
-	const op = "jwks.keys.utils.genPrivateKey"
+	const op = opString + "generatePrivateKey"
 
-	pk, err := rsa.GenerateKey(rand.Reader, 2048)
+	pk, err := rsa.GenerateKey(rand.Reader, 3072)
 	if err != nil {
-		return nil, fmt.Errorf("%s: private key not generated: %v", op, err)
+		return nil, fmt.Errorf("%s: private key not generated: %w", op, err)
 	}
 
 	keyID, err := uuid.NewV7()
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", op, err)
+	}
 
 	pkObj := &models.PrivateKey{
 		ID:  keyID.String(),
 		Key: pk,
 	}
 
+	if err := savePrivateKeyToFile(ks, pkObj); err != nil {
+		return nil, fmt.Errorf("%s: %w", op, err)
+	}
+
 	return pkObj, nil
 }
 
-func setPrivateKey(ks *KeysStore, pk *models.PrivateKey) error {
-	const op = "jwks.keys.utils.setPrivateKey"
+func setPrivateKey(ks *KeysStore, privateKey *models.PrivateKey) error {
+	const op = opString + "setPrivateKey"
 
-	if len(ks.PrivateKeys) != 0 {
+	ks.mu.Lock()
+	defer ks.mu.Unlock()
+
+	if len(ks.PrivateKeys) > 0 {
 		for _, v := range ks.PrivateKeys {
 			if err := deletePrivateKey(ks, v); err != nil {
-				return fmt.Errorf("%s: %v", op, err)
+				return fmt.Errorf("%s: %w", op, err)
 			}
 		}
 	}
 
-	ks.PrivateKeys[pk.ID] = pk
+	ks.PrivateKeys[privateKey.ID] = privateKey
 
-	ks.PublicKeys[pk.ID] = &models.PublicKey{
-		ID:  pk.ID,
-		Key: &pk.Key.PublicKey,
-	}
-
-	if err := savePrivateKeyToFile(pk, ks.KeysDir); err != nil {
-		return fmt.Errorf("%s: %v", op, err)
+	if !privateKey.IsSaved {
+		if err := savePrivateKeyToFile(ks, privateKey); err != nil {
+			return fmt.Errorf("%s: %w", op, err)
+		}
+		privateKey.IsSaved = true
 	}
 
 	return nil
 }
 
-func savePrivateKeyToFile(pk *models.PrivateKey, kDir string) error {
-	const op = "jwks.keys.utils.privateKeyToFile"
+func savePrivateKeyToFile(ks *KeysStore, privateKey *models.PrivateKey) error {
+	const op = opString + "savePrivateKeyToFile"
 
-	privateKeyBytes := x509.MarshalPKCS1PrivateKey(pk.Key)
+	privateKeyBytes := x509.MarshalPKCS1PrivateKey(privateKey.Key)
 	pemBlock := &pem.Block{
 		Type:  "RSA PRIVATE KEY",
 		Bytes: privateKeyBytes,
 	}
 
-	filePath := filepath.Join(kDir, pk.ID+".pem")
-	file, err := os.Create(filePath)
+	filePath := filepath.Join(ks.KeysDir, privateKey.ID+".pem")
+	file, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY, 0600)
 	if err != nil {
-		return fmt.Errorf("%s: failed to create key file: %v", op, err)
+		return fmt.Errorf("%s: failed to create key file: %w", op, err)
 	}
 	defer file.Close()
 
 	if err := pem.Encode(file, pemBlock); err != nil {
-		return fmt.Errorf("%s: failed to encode private key: %v", op, err)
+		return fmt.Errorf("%s: failed to encode private key: %w", op, err)
 	}
+
+	if err := savePublicKeyToFile(ks, privateKey); err != nil {
+		return fmt.Errorf("%s: failed to save public key: %w", op, err)
+	}
+
 	return nil
 }
 
 func deletePrivateKey(
 	ks *KeysStore,
-	pk *models.PrivateKey,
+	privateKey *models.PrivateKey,
 ) error {
-	const op = "jwks.keys.utils.deletePrivateKey"
+	const op = opString + "deletePrivateKey"
 
-	if err := deletePrivateKeyFile(pk.ID, ks.KeysDir); err != nil {
+	if err := deletePrivateKeyFile(privateKey.ID, ks.KeysDir); err != nil {
 		if os.IsNotExist(err) {
-			ks.Log.Debug("private key file not found, skipping deletion", slog.String("op", op), slog.String("keyID", pk.ID))
+			ks.Log.Debug("private key file not found, skipping deletion", slog.String("op", op), slog.String("keyID", privateKey.ID))
 		} else {
-			return fmt.Errorf("%s: %v", op, err)
+			return fmt.Errorf("%s: %w", op, err)
 		}
 	}
-	delete(ks.PrivateKeys, pk.ID)
 
-	ks.Log.Debug("private key %s is deleted", pk.ID, slog.String("op", op))
+	ks.mu.Lock()
+	defer ks.mu.Unlock()
+	delete(ks.PrivateKeys, privateKey.ID)
+
+	ks.Log.Debug("private key %s is deleted", privateKey.ID, slog.String("op", op))
 
 	return nil
 }
 
 func deletePrivateKeyFile(keyID string, kDir string) error {
-	const op = "jwks.keys.utils.deletePrivateKeyFile"
+	const op = opString + "deletePrivateKeyFile"
 
 	fileName := fmt.Sprintf("%s.pem", keyID)
 	path := path.Join(kDir, fileName)
 
 	if err := os.Remove(path); err != nil {
-		return fmt.Errorf("%s: %v", op, err)
+		return fmt.Errorf("%s: %w", op, err)
 	}
 	return nil
 }
@@ -242,67 +276,83 @@ func deletePrivateKeyFile(keyID string, kDir string) error {
 
 // -------------------------------Public Key Block------------------------------
 
-func getPublicKey(
-	ks *KeysStore,
-	privateKey *rsa.PrivateKey,
-) error {
-	panic("implement me!")
-}
+// func getPublicKey(
+// 	ks *KeysStore,
+// 	privateKey *rsa.PrivateKey,
+// ) error {
+// 	const op = "jwks.keys.utils.getPublicKey"
+// 	panic("implement me!")
+// }
 
 // Удаляет все все публичные ключи из keys folder
-func deletePublicKeys(ks *KeysStore) error {
-	const op = "utils.jwks.DeletePublicKeys"
+func deletePublicKeysFiles(ks *KeysStore) error {
+	const op = opString + "deletePublicKeys"
 
-	keys, err := os.ReadDir(ks.KeysDir)
+	entries, err := os.ReadDir(ks.KeysDir)
 	if err != nil {
-		return fmt.Errorf("%s: %v", op, err)
+		return fmt.Errorf("%s: %w", op, err)
 	}
 
-	for _, key := range keys {
-		if !key.IsDir() && path.Ext(key.Name()) == ".pub.pem" {
-			os.Remove(key.Name())
+	var errs []error
+	for _, entry := range entries {
+		if !entry.IsDir() && path.Ext(entry.Name()) == ".pub.pem" {
+			if err := os.Remove(filepath.Join(ks.KeysDir, entry.Name())); err != nil {
+				errs = append(errs, fmt.Errorf("%s: failed to remove public key %s: %w", op, entry.Name(), err))
+			} else {
+				keyID := filepath.Base(entry.Name())
+				if ext := filepath.Ext(keyID); ext != "" {
+					keyID = keyID[:len(keyID)-len(ext)]
+				}
+				delete(ks.PublicKeys, keyID)
+			}
 		}
 	}
-	ks.Log.Debug("public keys successfully deleted", slog.String("op", op))
+	if len(errs) > 0 {
+		return fmt.Errorf("%s: %w", op, errors.Join(errs...))
+	}
+	ks.Log.Debug("public keys deleted", slog.String("op", op))
+	return nil
+}
+
+func savePublicKeyToFile(ks *KeysStore, privateKey *models.PrivateKey) error {
+	const op = opString + "savePublicKeyToFile"
+
+	filePath := filepath.Join(ks.KeysDir, "rsa_public_key.pem")
+
+	pubASN1 := x509.MarshalPKCS1PublicKey(&privateKey.Key.PublicKey)
+	pubPEM := &pem.Block{
+		Type:  "RSA PUBLIC KEY",
+		Bytes: pubASN1,
+	}
+	file, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY, 0600)
+	if err != nil {
+		return fmt.Errorf("%s: failed to create key file: %w", op, err)
+	}
+	defer file.Close()
+
+	if err := pem.Encode(file, pubPEM); err != nil {
+		return fmt.Errorf("%s: failed to write public key to file: %w", op, err)
+	}
+
+	ks.PublicKeys[privateKey.ID] = &models.PublicKey{
+		ID:      privateKey.ID,
+		Key:     &privateKey.Key.PublicKey,
+		IsSaved: true,
+	}
 	return nil
 }
 
 // ----------------------------------End Block----------------------------------
 
-// FIXME
-// func saveKeys(
-// 	ks *KeysStore,
-// 	k *rsa.PrivateKey,
-// 	id string,
-// ) error {
-// 	if ks.PrivateKey == nil {
-// 		ks.PrivateKey = &models.PrivateKey{
-// 			ID:  id,
-// 			Key: k,
-// 		}
-
-// 		ks.PublicKeys[id] = &models.PublicKey{
-// 			ID:  id,
-// 			Key: &k.PublicKey,
-// 		}
-
-// 		return nil
-// 	}
-
-// 	deletePrivateKey()
-// 	go deletePublicKey()
-
-// }
-
 func checkKeysFolder(ks *KeysStore) error {
-	const op = "jwks.CheckKeysFolder"
+	const op = opString + "checkKeysFolder"
 
 	if _, err := os.Stat(ks.KeysDir); os.IsNotExist(err) {
 		if err := createKeysFolder(ks); err != nil {
-			return fmt.Errorf("%s: %v", op, err)
+			return fmt.Errorf("%s: %w", op, err)
 		}
 	} else if err != nil {
-		return fmt.Errorf("%s: %v", op, err)
+		return fmt.Errorf("%s: %w", op, err)
 	}
 
 	return nil
@@ -310,10 +360,10 @@ func checkKeysFolder(ks *KeysStore) error {
 }
 
 func createKeysFolder(ks *KeysStore) error {
-	const op = "jwks.keys.utils.createKeysFolder"
+	const op = opString + "createKeysFolder"
 
 	if err := os.Mkdir(ks.KeysDir, 0700); err != nil {
-		return fmt.Errorf("%s: %v", op, err)
+		return fmt.Errorf("%s: %w", op, err)
 	}
 
 	ks.Log.Debug("keys folder created", slog.String("op", op))
@@ -321,34 +371,53 @@ func createKeysFolder(ks *KeysStore) error {
 }
 
 // Перевод PublicKey в формат для передачи клиентам
-func convertToJWKS(
-	ks *KeysStore,
-	pubKey *rsa.PublicKey,
-) (map[string]any, error) {
-	panic("implement me!")
+func convertToJWKS(pubKeyObj *models.PublicKey) (map[string]any, error) {
+	pubKey := pubKeyObj.Key
+	n := base64.RawURLEncoding.EncodeToString(pubKey.N.Bytes())
+	e := base64.RawURLEncoding.EncodeToString(big.NewInt(int64(pubKey.E)).Bytes())
+	return map[string]any{
+		"kid": pubKeyObj.ID,
+		"kty": "RSA",
+		"alg": "RS256",
+		"use": "sig",
+		"n":   n,
+		"e":   e,
+	}, nil
 }
 
 // gorutine для отложенного удаления public key через определенное время
-func deletePublicKeyTask(ks *KeysStore, id string) error {
-	const op = "jwks.keys.utils.deletePublicKey"
+func deletePublicKeyTask(ctx context.Context, ks *KeysStore, id string) error {
+	const op = opString + "deletePublicKeyTask"
 
 	timer := time.NewTimer(ks.TokenTTL + time.Minute)
+	defer timer.Stop()
 
 	go func() {
-		<-timer.C
-		delete(ks.PublicKeys, id)
+		select {
+		case <-timer.C:
+			ks.mu.Lock()
+			defer ks.mu.Unlock()
+			if _, exists := ks.PublicKeys[id]; exists {
+				delete(ks.PublicKeys, id)
+				ks.Log.Info("public key deleted", slog.String("op", op), slog.String("keyID", id))
+			} else {
+				ks.Log.Debug("public key not found, skipping deletion", slog.String("op", op), slog.String("keyID", id))
+			}
+		case <-ctx.Done():
+			ks.Log.Debug("public key deletion cancelled", slog.String("op", op), slog.String("keyID", id))
+			return
+		}
 	}()
 
-	ks.Log.Debug("public key %s is deleted", id, slog.String("op", op))
 	return nil
 }
 
 func listPrivateKeysFiles(keysDir string) ([]os.DirEntry, error) {
-	const op = "jwks.keys.utils.getPrivateKeysFiles"
+	const op = opString + "listPrivateKeysFiles"
 
 	entries, err := os.ReadDir(keysDir)
 	if err != nil {
-		return nil, fmt.Errorf("%s: failed to read directory: %v", op, err)
+		return nil, fmt.Errorf("%s: failed to read directory: %w", op, err)
 	}
 
 	var pemFiles []os.DirEntry

@@ -1,8 +1,10 @@
 package keys
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/Grino777/sso/internal/services/jwks/models"
@@ -14,6 +16,7 @@ type KeysStore struct {
 	PrivateKeys map[string]*models.PrivateKey
 	PublicKeys  map[string]*models.PublicKey
 	TokenTTL    time.Duration
+	mu          sync.RWMutex
 }
 
 func New(
@@ -21,7 +24,7 @@ func New(
 	keysDir string,
 	tokenTTL time.Duration,
 ) (*KeysStore, error) {
-	const op = "jwks.keys.New"
+	const op = "jwks.keys.keys.New"
 
 	ks := &KeysStore{
 		Log:         log,
@@ -39,12 +42,15 @@ func New(
 }
 
 func (ks *KeysStore) GetPublicKeys() ([]map[string]any, error) {
-	const op = "jwks.keys.GetPublicKeys"
+	const op = "jwks.keys.keys.GetPublicKeys"
 
 	data := []map[string]any{}
 
+	ks.mu.RLock()
+	defer ks.mu.RUnlock()
+
 	for _, v := range ks.PublicKeys {
-		key, err := convertToJWKS(ks, v.Key)
+		key, err := convertToJWKS(v)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %v", op, err)
 		}
@@ -54,17 +60,29 @@ func (ks *KeysStore) GetPublicKeys() ([]map[string]any, error) {
 }
 
 // Производит замену ключей (приватного и публичного)
-// func (ks *KeysStore) RotateKeys() error {
-// 	const op = "jwks.keys.RotateKeys"
+func (ks *KeysStore) RotateKeys() error {
+	const op = "jwks.keys.keys.RotateKeys"
 
-// 	if ks.PrivateKeys == nil {
-// 		if err := generatePrivateKey(ks); err != nil {
-// 			return fmt.Errorf("%s: %v", op, err)
-// 		}
-// 	} else {
-// 		if err := setPrivateKey(ks); err != nil {
-// 			return fmt.Errorf("%s: %v", op, err)
-// 		}
-// 	}
-// 	return nil
-// }
+	ctx := context.Background()
+
+	oldPrivateKey, err := getLatestPrivateKey(ks)
+	if err != nil {
+		return err
+	}
+	if err := deletePrivateKey(ks, oldPrivateKey); err != nil {
+		return err
+	}
+	newPrivateKey, err := generatePrivateKey(ks)
+	if err != nil {
+		return err
+	}
+	if err := setPrivateKey(ks, newPrivateKey); err != nil {
+		return err
+	}
+	if err := deletePublicKeyTask(ctx, ks, oldPrivateKey.ID); err != nil {
+		return err
+	}
+
+	ks.Log.Info("keys rotated successfully", slog.String("op", op), slog.String("newKeyID", newPrivateKey.ID))
+	return nil
+}
