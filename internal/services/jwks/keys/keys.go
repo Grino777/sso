@@ -41,10 +41,10 @@ func New(
 	return ks, nil
 }
 
-func (ks *KeysStore) GetPublicKeys() ([]map[string]any, error) {
+func (ks *KeysStore) GetPublicKeys() ([]*models.JWKSToken, error) {
 	const op = "jwks.keys.keys.GetPublicKeys"
 
-	data := []map[string]any{}
+	data := []*models.JWKSToken{}
 
 	ks.mu.RLock()
 	defer ks.mu.RUnlock()

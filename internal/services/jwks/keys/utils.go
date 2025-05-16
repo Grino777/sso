@@ -15,6 +15,7 @@ import (
 	"path"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/Grino777/sso/internal/services/jwks/models"
@@ -94,6 +95,10 @@ func getLatestPrivateKey(ks *KeysStore) (*models.PrivateKey, error) {
 		return nil, fmt.Errorf("%s: %w", op, err)
 	}
 
+	if err := deleteOldPrivateKeys(ks, pemFiles); err != nil {
+		return nil, err
+	}
+
 	return latestKey, nil
 }
 
@@ -119,10 +124,6 @@ func deleteOldPrivateKeys(ks *KeysStore, pemFiles []os.DirEntry) error {
 func findLatestPrivateKey(ks *KeysStore, pemFiles []os.DirEntry) (*models.PrivateKey, error) {
 	const op = opString + "findLatestPrivateKey"
 
-	if len(pemFiles) == 0 {
-		return nil, errKeyNotExist
-	}
-
 	sort.Slice(pemFiles, func(i, j int) bool {
 		infoI, _ := pemFiles[i].Info()
 		infoJ, _ := pemFiles[j].Info()
@@ -146,10 +147,6 @@ func findLatestPrivateKey(ks *KeysStore, pemFiles []os.DirEntry) (*models.Privat
 	keyID := filepath.Base(pemFiles[0].Name())
 	if ext := filepath.Ext(keyID); ext != "" {
 		keyID = keyID[:len(keyID)-len(ext)]
-	}
-
-	if err := deleteOldPrivateKeys(ks, pemFiles); err != nil {
-		return nil, err
 	}
 
 	return &models.PrivateKey{
@@ -190,7 +187,7 @@ func setPrivateKey(ks *KeysStore, privateKey *models.PrivateKey) error {
 	ks.mu.Lock()
 	defer ks.mu.Unlock()
 
-	if len(ks.PrivateKeys) > 0 {
+	if len(ks.PrivateKeys) > 1 {
 		for _, v := range ks.PrivateKeys {
 			if err := deletePrivateKey(ks, v); err != nil {
 				return fmt.Errorf("%s: %w", op, err)
@@ -205,6 +202,9 @@ func setPrivateKey(ks *KeysStore, privateKey *models.PrivateKey) error {
 			return fmt.Errorf("%s: %w", op, err)
 		}
 		privateKey.IsSaved = true
+	}
+	if err := savePublicKeyToFile(ks, privateKey); err != nil {
+		return fmt.Errorf("%s: failed to save public key: %w", op, err)
 	}
 
 	return nil
@@ -229,11 +229,6 @@ func savePrivateKeyToFile(ks *KeysStore, privateKey *models.PrivateKey) error {
 	if err := pem.Encode(file, pemBlock); err != nil {
 		return fmt.Errorf("%s: failed to encode private key: %w", op, err)
 	}
-
-	if err := savePublicKeyToFile(ks, privateKey); err != nil {
-		return fmt.Errorf("%s: failed to save public key: %w", op, err)
-	}
-
 	return nil
 }
 
@@ -295,7 +290,7 @@ func deletePublicKeysFiles(ks *KeysStore) error {
 
 	var errs []error
 	for _, entry := range entries {
-		if !entry.IsDir() && path.Ext(entry.Name()) == ".pub.pem" {
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".pub.pem") {
 			if err := os.Remove(filepath.Join(ks.KeysDir, entry.Name())); err != nil {
 				errs = append(errs, fmt.Errorf("%s: failed to remove public key %s: %w", op, entry.Name(), err))
 			} else {
@@ -310,14 +305,14 @@ func deletePublicKeysFiles(ks *KeysStore) error {
 	if len(errs) > 0 {
 		return fmt.Errorf("%s: %w", op, errors.Join(errs...))
 	}
-	ks.Log.Debug("public keys deleted", slog.String("op", op))
+	ks.Log.Info("public keys deleted", slog.String("op", op))
 	return nil
 }
 
 func savePublicKeyToFile(ks *KeysStore, privateKey *models.PrivateKey) error {
 	const op = opString + "savePublicKeyToFile"
 
-	filePath := filepath.Join(ks.KeysDir, "rsa_public_key.pem")
+	filePath := filepath.Join(ks.KeysDir, privateKey.ID+".pub.pem")
 
 	pubASN1 := x509.MarshalPKCS1PublicKey(&privateKey.Key.PublicKey)
 	pubPEM := &pem.Block{
@@ -371,17 +366,18 @@ func createKeysFolder(ks *KeysStore) error {
 }
 
 // Перевод PublicKey в формат для передачи клиентам
-func convertToJWKS(pubKeyObj *models.PublicKey) (map[string]any, error) {
+func convertToJWKS(pubKeyObj *models.PublicKey) (*models.JWKSToken, error) {
 	pubKey := pubKeyObj.Key
 	n := base64.RawURLEncoding.EncodeToString(pubKey.N.Bytes())
 	e := base64.RawURLEncoding.EncodeToString(big.NewInt(int64(pubKey.E)).Bytes())
-	return map[string]any{
-		"kid": pubKeyObj.ID,
-		"kty": "RSA",
-		"alg": "RS256",
-		"use": "sig",
-		"n":   n,
-		"e":   e,
+
+	return &models.JWKSToken{
+		Kid: pubKeyObj.ID,
+		Kty: "RSA",
+		Alg: "RS256",
+		Use: "sig",
+		N:   n,
+		E:   e,
 	}, nil
 }
 
@@ -422,7 +418,7 @@ func listPrivateKeysFiles(keysDir string) ([]os.DirEntry, error) {
 
 	var pemFiles []os.DirEntry
 	for _, entry := range entries {
-		if !entry.IsDir() && path.Ext(entry.Name()) == ".pem" {
+		if !entry.IsDir() && path.Ext(entry.Name()) == ".pem" && !strings.HasSuffix(entry.Name(), ".pub.pem") {
 			pemFiles = append(pemFiles, entry)
 		}
 	}

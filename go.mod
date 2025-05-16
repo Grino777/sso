@@ -3,7 +3,7 @@ module github.com/Grino777/sso
 go 1.23.6
 
 require (
-	github.com/Grino777/sso-proto v1.2.6
+	github.com/Grino777/sso-proto v1.2.8
 	github.com/alicebob/miniredis/v2 v2.34.0
 	github.com/golang-jwt/jwt/v5 v5.2.2
 	github.com/google/uuid v1.6.0

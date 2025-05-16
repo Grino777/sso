@@ -46,7 +46,7 @@ func (rs *RedisStorage) connectWithRetry(maxAttempts int) error {
 	var lastErr error
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		if err := rs.connect(); err == nil {
-			rs.Log.Info("redis connection established")
+			rs.Log.Debug("redis connection established")
 			return nil
 		} else {
 			lastErr = err

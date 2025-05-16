@@ -35,6 +35,20 @@ func New(
 }
 
 // FIXME
-func (j *JwksService) GetJwks(context.Context) error {
-	panic("implement me!")
+func (j *JwksService) GetJwks(context.Context) ([]*sso.Jwk, error) {
+	const op = "jwks.jwks.GetJwks"
+
+	publicKeys, err := j.keysStore.GetPublicKeys()
+	if err != nil {
+		j.log.Error("%s: %v", op, err)
+		return nil, err
+	}
+
+	data := []*sso.Jwk{}
+	for _, token := range publicKeys {
+		convertedToken := token.ConvertToken()
+		data = append(data, convertedToken)
+	}
+
+	return data, nil
 }
