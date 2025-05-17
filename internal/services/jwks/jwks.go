@@ -8,6 +8,7 @@ import (
 
 	"github.com/Grino777/sso-proto/gen/go/sso"
 	"github.com/Grino777/sso/internal/services/jwks/keys"
+	"github.com/Grino777/sso/internal/services/jwks/models"
 )
 
 type JwksService struct {
@@ -51,4 +52,13 @@ func (j *JwksService) GetJwks(context.Context) ([]*sso.Jwk, error) {
 	}
 
 	return data, nil
+}
+
+func (j *JwksService) GetLatestPrivateKey(ctx context.Context) (*models.PrivateKey, error) {
+	privateKey, err := j.keysStore.GetLatestPrivateKey()
+	if err != nil {
+		return nil, err
+	}
+
+	return privateKey, nil
 }

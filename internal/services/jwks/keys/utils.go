@@ -22,7 +22,7 @@ import (
 	"github.com/google/uuid"
 )
 
-const opString = "jwks.keys.utils."
+const utilsOp = "jwks.keys.utils."
 
 var (
 	errKeyNotExist = errors.New("private key not exist")
@@ -31,7 +31,7 @@ var (
 // ----------------------------------Init Block---------------------------------
 
 func initKeys(ks *KeysStore) error {
-	const op = opString + "initKeys"
+	const op = utilsOp + "initKeys"
 
 	if err := loadKeys(ks); err != nil {
 		return fmt.Errorf("%s: %w", op, err)
@@ -40,7 +40,7 @@ func initKeys(ks *KeysStore) error {
 }
 
 func loadKeys(ks *KeysStore) error {
-	const op = opString + "loadKeys"
+	const op = utilsOp + "loadKeys"
 
 	if err := checkKeysFolder(ks); err != nil {
 		return fmt.Errorf("%s: %w", op, err)
@@ -63,7 +63,7 @@ func loadKeys(ks *KeysStore) error {
 // ------------------------------Private Key Block------------------------------
 
 func retrievePrivateKey(ks *KeysStore) (*models.PrivateKey, error) {
-	const op = opString + "retrievePrivateKey"
+	const op = utilsOp + "retrievePrivateKey"
 
 	privateKey, err := getLatestPrivateKey(ks)
 	if err != nil {
@@ -77,7 +77,7 @@ func retrievePrivateKey(ks *KeysStore) (*models.PrivateKey, error) {
 }
 
 func getLatestPrivateKey(ks *KeysStore) (*models.PrivateKey, error) {
-	const op = opString + "getLatestPrivateKey"
+	const op = utilsOp + "getLatestPrivateKey"
 
 	pemFiles, err := listPrivateKeysFiles(ks.KeysDir)
 	if errors.Is(err, errKeyNotExist) {
@@ -103,7 +103,7 @@ func getLatestPrivateKey(ks *KeysStore) (*models.PrivateKey, error) {
 }
 
 func deleteOldPrivateKeys(ks *KeysStore, pemFiles []os.DirEntry) error {
-	const op = opString + "deleteOldPrivateKeys"
+	const op = utilsOp + "deleteOldPrivateKeys"
 
 	for _, entry := range pemFiles[1:] {
 		keyID := filepath.Base(entry.Name())
@@ -122,7 +122,7 @@ func deleteOldPrivateKeys(ks *KeysStore, pemFiles []os.DirEntry) error {
 }
 
 func findLatestPrivateKey(ks *KeysStore, pemFiles []os.DirEntry) (*models.PrivateKey, error) {
-	const op = opString + "findLatestPrivateKey"
+	const op = utilsOp + "findLatestPrivateKey"
 
 	sort.Slice(pemFiles, func(i, j int) bool {
 		infoI, _ := pemFiles[i].Info()
@@ -157,7 +157,7 @@ func findLatestPrivateKey(ks *KeysStore, pemFiles []os.DirEntry) (*models.Privat
 }
 
 func generatePrivateKey(ks *KeysStore) (*models.PrivateKey, error) {
-	const op = opString + "generatePrivateKey"
+	const op = utilsOp + "generatePrivateKey"
 
 	pk, err := rsa.GenerateKey(rand.Reader, 3072)
 	if err != nil {
@@ -182,7 +182,7 @@ func generatePrivateKey(ks *KeysStore) (*models.PrivateKey, error) {
 }
 
 func setPrivateKey(ks *KeysStore, privateKey *models.PrivateKey) error {
-	const op = opString + "setPrivateKey"
+	const op = utilsOp + "setPrivateKey"
 
 	ks.mu.Lock()
 	defer ks.mu.Unlock()
@@ -211,7 +211,7 @@ func setPrivateKey(ks *KeysStore, privateKey *models.PrivateKey) error {
 }
 
 func savePrivateKeyToFile(ks *KeysStore, privateKey *models.PrivateKey) error {
-	const op = opString + "savePrivateKeyToFile"
+	const op = utilsOp + "savePrivateKeyToFile"
 
 	privateKeyBytes := x509.MarshalPKCS1PrivateKey(privateKey.Key)
 	pemBlock := &pem.Block{
@@ -236,7 +236,7 @@ func deletePrivateKey(
 	ks *KeysStore,
 	privateKey *models.PrivateKey,
 ) error {
-	const op = opString + "deletePrivateKey"
+	const op = utilsOp + "deletePrivateKey"
 
 	if err := deletePrivateKeyFile(privateKey.ID, ks.KeysDir); err != nil {
 		if os.IsNotExist(err) {
@@ -256,7 +256,7 @@ func deletePrivateKey(
 }
 
 func deletePrivateKeyFile(keyID string, kDir string) error {
-	const op = opString + "deletePrivateKeyFile"
+	const op = utilsOp + "deletePrivateKeyFile"
 
 	fileName := fmt.Sprintf("%s.pem", keyID)
 	path := path.Join(kDir, fileName)
@@ -281,7 +281,7 @@ func deletePrivateKeyFile(keyID string, kDir string) error {
 
 // Удаляет все все публичные ключи из keys folder
 func deletePublicKeysFiles(ks *KeysStore) error {
-	const op = opString + "deletePublicKeys"
+	const op = utilsOp + "deletePublicKeys"
 
 	entries, err := os.ReadDir(ks.KeysDir)
 	if err != nil {
@@ -310,7 +310,7 @@ func deletePublicKeysFiles(ks *KeysStore) error {
 }
 
 func savePublicKeyToFile(ks *KeysStore, privateKey *models.PrivateKey) error {
-	const op = opString + "savePublicKeyToFile"
+	const op = utilsOp + "savePublicKeyToFile"
 
 	filePath := filepath.Join(ks.KeysDir, privateKey.ID+".pub.pem")
 
@@ -340,7 +340,7 @@ func savePublicKeyToFile(ks *KeysStore, privateKey *models.PrivateKey) error {
 // ----------------------------------End Block----------------------------------
 
 func checkKeysFolder(ks *KeysStore) error {
-	const op = opString + "checkKeysFolder"
+	const op = utilsOp + "checkKeysFolder"
 
 	if _, err := os.Stat(ks.KeysDir); os.IsNotExist(err) {
 		if err := createKeysFolder(ks); err != nil {
@@ -355,7 +355,7 @@ func checkKeysFolder(ks *KeysStore) error {
 }
 
 func createKeysFolder(ks *KeysStore) error {
-	const op = opString + "createKeysFolder"
+	const op = utilsOp + "createKeysFolder"
 
 	if err := os.Mkdir(ks.KeysDir, 0700); err != nil {
 		return fmt.Errorf("%s: %w", op, err)
@@ -383,7 +383,7 @@ func convertToJWKS(pubKeyObj *models.PublicKey) (*models.JWKSToken, error) {
 
 // gorutine для отложенного удаления public key через определенное время
 func deletePublicKeyTask(ctx context.Context, ks *KeysStore, id string) error {
-	const op = opString + "deletePublicKeyTask"
+	const op = utilsOp + "deletePublicKeyTask"
 
 	timer := time.NewTimer(ks.TokenTTL + time.Minute)
 	defer timer.Stop()
@@ -409,7 +409,7 @@ func deletePublicKeyTask(ctx context.Context, ks *KeysStore, id string) error {
 }
 
 func listPrivateKeysFiles(keysDir string) ([]os.DirEntry, error) {
-	const op = opString + "listPrivateKeysFiles"
+	const op = utilsOp + "listPrivateKeysFiles"
 
 	entries, err := os.ReadDir(keysDir)
 	if err != nil {

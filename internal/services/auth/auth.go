@@ -11,6 +11,7 @@ import (
 	"github.com/Grino777/sso/internal/domain/models"
 	cjwt "github.com/Grino777/sso/internal/lib/jwt"
 	"github.com/Grino777/sso/internal/lib/logger"
+	jwksM "github.com/Grino777/sso/internal/services/jwks/models"
 	"github.com/Grino777/sso/internal/storage"
 	authU "github.com/Grino777/sso/internal/utils/auth"
 
@@ -64,14 +65,19 @@ type CacheAppProvider interface {
 	SaveApp(ctx context.Context, app *models.App) error
 }
 
+type JwksProvider interface {
+	GetLatestPrivateKey(ctx context.Context) (*jwksM.PrivateKey, error)
+}
+
 // -----------------------------------End Block------------------------------------
 
 // Объект для взаимодейсвтия с БД
 type AuthService struct {
-	log      *slog.Logger
-	db       DBStorage
-	cache    CacheStorage
-	tokenTTL time.Duration
+	log         *slog.Logger
+	db          DBStorage
+	cache       CacheStorage
+	tokenTTL    time.Duration
+	jwksService JwksProvider
 }
 
 func New(
@@ -79,6 +85,7 @@ func New(
 	db DBStorage,
 	cache CacheStorage,
 	tokenTTL time.Duration,
+	jwksService JwksProvider,
 ) *AuthService {
 	return &AuthService{
 		log:      log,
@@ -128,7 +135,12 @@ func (s *AuthService) Login(
 		return nil, fmt.Errorf("%s: %w", op, err)
 	}
 
-	tokenObj, err := cjwt.NewAccessToken(user, app, s.tokenTTL)
+	privateKey, err := s.jwksService.GetLatestPrivateKey(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	tokenObj, err := cjwt.NewAccessToken(user, app, privateKey, s.tokenTTL)
 	if err != nil {
 		log.Error("%s: %w", op, err)
 		return nil, err

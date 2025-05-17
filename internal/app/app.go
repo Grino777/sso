@@ -44,17 +44,9 @@ func New(
 	if err := loadConfig(app); err != nil {
 		return nil, fmt.Errorf("%s: %v", op, err)
 	}
-
-	// FIXME
-	// keys, err := loadKeys(app)
-	// if err != nil {
-	// 	return nil, fmt.Errorf("%s: %v", op, err)
-	// }
-
 	if err := initDB(app); err != nil {
 		return nil, fmt.Errorf("%s: %v", op, err)
 	}
-
 	if err := initCache(app); err != nil {
 		return nil, fmt.Errorf("%s: %v", op, err)
 	}
@@ -126,7 +118,7 @@ func initServices(a *App) *Services {
 		panic("jwks service not initialized")
 	}
 
-	authService := auth.New(a.Logger, a.DBStorage, a.RedisStorage, a.Config.TokenTTL)
+	authService := auth.New(a.Logger, a.DBStorage, a.RedisStorage, a.Config.TokenTTL, jwksService)
 
 	return &Services{
 		jwksService: jwksService,
@@ -156,20 +148,3 @@ func loadConfig(a *App) error {
 	a.Logger.Debug("config loaded successfully", slog.String("op", op))
 	return nil
 }
-
-// func loadKeys(a *App) (*types.KeysType, error) {
-// 	const op = "app.loadKeys"
-
-// 	if err := appUtils.CheckKeysFolder(a.Config.KeysDir); err != nil {
-// 		return nil, fmt.Errorf("%s: %v", op, err)
-// 	}
-
-// 	keys, err := appUtils.LoadKeys(a.Config.KeysDir)
-// 	if err != nil {
-// 		return nil, fmt.Errorf("%s: %v", op, err)
-// 	}
-
-// 	a.Logger.Debug("%s: keys loaded successfully", op)
-
-// 	return keys, nil
-// }

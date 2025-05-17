@@ -1,13 +1,5 @@
 {
     "sqltools.useNodeRuntime": true,
-    "sqltools.connections": [
-        {
-            "previewLimit": 50,
-            "driver": "SQLite",
-            "database": "${workspaceFolder:sso-app}/storage/sso.sqlite3",
-            "name": "SSO"
-        }
-    ],
     "editor.wordWrap": "on",
     "[yaml]": {
         "editor.insertSpaces": true,

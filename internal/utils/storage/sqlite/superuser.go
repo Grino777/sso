@@ -8,7 +8,8 @@ import (
 )
 
 // Cоздает пользователя с ролью superadmin, если такой еще не существует.
-func CreateSuperUser(db *sql.DB,
+func CreateSuperUser(
+	db *sql.DB,
 	username, password string,
 ) error {
 	const op = "storage.sqlite.CreateSuperUser"

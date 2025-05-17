@@ -10,6 +10,10 @@ import (
 	"github.com/Grino777/sso/internal/services/jwks/models"
 )
 
+const (
+	keysOp = "jwks.keys.keys."
+)
+
 type KeysStore struct {
 	Log         *slog.Logger
 	KeysDir     string
@@ -24,7 +28,7 @@ func New(
 	keysDir string,
 	tokenTTL time.Duration,
 ) (*KeysStore, error) {
-	const op = "jwks.keys.keys.New"
+	const op = keysOp + "New"
 
 	ks := &KeysStore{
 		Log:         log,
@@ -42,7 +46,7 @@ func New(
 }
 
 func (ks *KeysStore) GetPublicKeys() ([]*models.JWKSToken, error) {
-	const op = "jwks.keys.keys.GetPublicKeys"
+	const op = keysOp + "GetPublicKeys"
 
 	data := []*models.JWKSToken{}
 
@@ -61,7 +65,7 @@ func (ks *KeysStore) GetPublicKeys() ([]*models.JWKSToken, error) {
 
 // Производит замену ключей (приватного и публичного)
 func (ks *KeysStore) RotateKeys() error {
-	const op = "jwks.keys.keys.RotateKeys"
+	const op = keysOp + "RotateKeys"
 
 	ctx := context.Background()
 
@@ -85,4 +89,12 @@ func (ks *KeysStore) RotateKeys() error {
 
 	ks.Log.Info("keys rotated successfully", slog.String("op", op), slog.String("newKeyID", newPrivateKey.ID))
 	return nil
+}
+
+func (ks *KeysStore) GetLatestPrivateKey() (*models.PrivateKey, error) {
+	privateKey, err := getLatestPrivateKey(ks)
+	if err != nil {
+		return nil, err
+	}
+	return privateKey, nil
 }

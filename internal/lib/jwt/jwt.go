@@ -1,15 +1,23 @@
 package jwt
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/Grino777/sso/internal/domain/models"
+	jwksM "github.com/Grino777/sso/internal/services/jwks/models"
 
 	"github.com/golang-jwt/jwt/v5"
 )
 
 // Create new token for user
-func NewAccessToken(user *models.User, app *models.App, d time.Duration) (*models.Token, error) {
+func NewAccessToken(
+	user *models.User,
+	app *models.App,
+	pk *jwksM.PrivateKey,
+	d time.Duration,
+) (*models.Token, error) {
+	const op = "lib.jwt.NewAccessToken"
 
 	tObj := &models.Token{}
 
@@ -17,6 +25,7 @@ func NewAccessToken(user *models.User, app *models.App, d time.Duration) (*model
 	expire_at := time.Now().UTC().Add(d).Unix()
 
 	claims := token.Claims.(jwt.MapClaims)
+	claims["kid"] = ""
 	claims["user_id"] = user.ID
 	claims["role_id"] = user.Role_id
 	claims["username"] = user.Username
@@ -25,7 +34,7 @@ func NewAccessToken(user *models.User, app *models.App, d time.Duration) (*model
 
 	tokenString, err := token.SignedString([]byte(app.Secret))
 	if err != nil {
-		return tObj, err
+		return tObj, fmt.Errorf("%s: %v", op, err)
 	}
 
 	tObj = &models.Token{

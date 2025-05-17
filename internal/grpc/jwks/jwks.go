@@ -30,6 +30,5 @@ func (j *JwksServer) GetJwks(
 	if err != nil {
 		return nil, status.Error(codes.Internal, "internal error")
 	}
-
 	return &sso.GetJwksResponse{Keys: tokensList}, nil
 }
