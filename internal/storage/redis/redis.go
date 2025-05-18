@@ -54,35 +54,24 @@ func (rs *RedisStorage) SaveUser(
 	user *models.User,
 	app *models.App,
 ) error {
-	_, err := withClient(
-		rs,
-		ctx,
-		func(rc *redis.Client) (struct{}, error) {
-			const op = "redis.SaveUser"
+	_, err := withClient(rs, ctx, func(rc *redis.Client) (struct{}, error) {
+		const op = "redis.SaveUser"
 
-			user.Password = ""
+		user.Password = ""
 
-			// newUser := struct {
-			// 	ID       uint32
-			// 	Username string
-			// 	Role     uint32
-			// 	PassHash string
-			// 	Token    string
-			// }{uint32(user.ID), user.Username, uint32(user.Role_id), string(user.PassHash), token}
+		data, err := json.Marshal(user)
+		if err != nil {
+			return struct{}{}, err
+		}
 
-			data, err := json.Marshal(user)
-			if err != nil {
-				return struct{}{}, err
-			}
-
-			resString := fmt.Sprintf("users:%d:%s", app.ID, user.Username)
-			err = rc.Set(ctx, resString, data, rs.Cfg.TokenTTL).Err()
-			if err != nil {
-				return struct{}{}, fmt.Errorf("%s: %v", op, err)
-			}
-			rs.Log.Debug("user successfuly cached", "username", user.Username)
-			return struct{}{}, nil
-		})
+		resString := fmt.Sprintf("users:%d:%s", app.ID, user.Username)
+		err = rc.Set(ctx, resString, data, rs.Cfg.TokenTTL).Err()
+		if err != nil {
+			return struct{}{}, fmt.Errorf("%s: %v", op, err)
+		}
+		rs.Log.Debug("user successfuly cached", "username", user.Username)
+		return struct{}{}, nil
+	})
 
 	return err
 }

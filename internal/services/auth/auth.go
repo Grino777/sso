@@ -88,10 +88,11 @@ func New(
 	jwksService JwksProvider,
 ) *AuthService {
 	return &AuthService{
-		log:      log,
-		db:       db,
-		cache:    cache,
-		tokenTTL: tokenTTL,
+		log:         log,
+		db:          db,
+		cache:       cache,
+		tokenTTL:    tokenTTL,
+		jwksService: jwksService,
 	}
 }
 
@@ -145,7 +146,7 @@ func (s *AuthService) Login(
 		log.Error("%s: %w", op, err)
 		return nil, err
 	}
-	user.Token = tokenObj
+	user.AcessToken = tokenObj
 
 	err = s.cache.SaveUser(ctx, user, app)
 	if err != nil {

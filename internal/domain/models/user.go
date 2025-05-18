@@ -9,12 +9,13 @@ const (
 )
 
 type User struct {
-	ID       int64
-	Username string
-	Password string
-	PassHash []byte
-	Role_id  int
-	Token    *Token
+	ID           int64
+	Username     string
+	Password     string
+	PassHash     []byte
+	Role_id      int
+	AcessToken   *Token
+	RefreshToken *Token
 }
 
 func (u *User) validateFields() error {

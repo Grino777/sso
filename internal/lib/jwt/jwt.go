@@ -25,14 +25,14 @@ func NewAccessToken(
 	expire_at := time.Now().UTC().Add(d).Unix()
 
 	claims := token.Claims.(jwt.MapClaims)
-	claims["kid"] = ""
+	claims["kid"] = pk.ID
 	claims["user_id"] = user.ID
 	claims["role_id"] = user.Role_id
 	claims["username"] = user.Username
 	claims["app_id"] = app.ID
 	claims["exp"] = expire_at
 
-	tokenString, err := token.SignedString([]byte(app.Secret))
+	tokenString, err := token.SignedString(pk.Key)
 	if err != nil {
 		return tObj, fmt.Errorf("%s: %v", op, err)
 	}
