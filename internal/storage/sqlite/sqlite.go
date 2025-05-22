@@ -86,10 +86,10 @@ func (s *SQLiteStorage) SaveUser(
 func (s *SQLiteStorage) GetUser(
 	ctx context.Context,
 	username string,
-) (*models.User, error) {
+) (models.User, error) {
 	const op = "storage.sqlite.GetUser"
 
-	user := &models.User{}
+	user := models.User{}
 
 	query := "SELECT * FROM users WHERE username = ?"
 	err := s.db.QueryRowContext(ctx, query, username).Scan(
@@ -100,9 +100,9 @@ func (s *SQLiteStorage) GetUser(
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, storage.ErrUserNotFound
+			return user, storage.ErrUserNotFound
 		}
-		return nil, fmt.Errorf("%s: %v", op, err)
+		return user, fmt.Errorf("%s: %v", op, err)
 	}
 	return user, nil
 }
@@ -110,10 +110,10 @@ func (s *SQLiteStorage) GetUser(
 func (s *SQLiteStorage) GetApp(
 	ctx context.Context,
 	appID uint32,
-) (app *models.App, err error) {
+) (app models.App, err error) {
 	const op = "sqlite.GetApp"
 
-	app = &models.App{}
+	app = models.App{}
 
 	query := "SELECT * FROM apps WHERE id = ?"
 	err = s.db.QueryRowContext(ctx, query, appID).Scan(
@@ -123,9 +123,9 @@ func (s *SQLiteStorage) GetApp(
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, storage.ErrUserNotFound
+			return app, storage.ErrUserNotFound
 		}
-		return nil, fmt.Errorf("%s: %v", op, err)
+		return app, fmt.Errorf("%s: %v", op, err)
 	}
 
 	return app, nil
@@ -137,4 +137,12 @@ func (s *SQLiteStorage) IsAdmin(
 	user *models.User,
 ) (bool, error) {
 	panic("implement me")
+}
+
+func (s *SQLiteStorage) DeleteRefreshToken(token string) error {
+	panic("implement me!")
+}
+
+func (s *SQLiteStorage) SaveRefreshToken(token string) error {
+	panic("implement me!")
 }

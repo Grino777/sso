@@ -1,6 +1,8 @@
 package jwt
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"fmt"
 	"time"
 
@@ -10,16 +12,39 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
+func CreateNewTokens(
+	user models.User,
+	app models.App,
+	pk *jwksM.PrivateKey,
+	atd time.Duration, // acess token duration
+	rtd time.Duration, // refresh token duration
+) (models.Tokens, error) {
+	acessToken, err := NewAccessToken(user, app, pk, atd)
+	if err != nil {
+		return models.Tokens{}, err
+	}
+
+	refreshToken, err := NewRefreshToken(user, app, rtd)
+	if err != nil {
+		return models.Tokens{}, err
+	}
+
+	return models.Tokens{
+		AccessToken:  acessToken,
+		RefreshToken: refreshToken,
+	}, nil
+}
+
 // Create new token for user
 func NewAccessToken(
-	user *models.User,
-	app *models.App,
+	user models.User,
+	app models.App,
 	pk *jwksM.PrivateKey,
 	d time.Duration,
-) (*models.Token, error) {
+) (models.Token, error) {
 	const op = "lib.jwt.NewAccessToken"
 
-	tObj := &models.Token{}
+	tObj := models.Token{}
 
 	token := jwt.New(jwt.SigningMethodRS256)
 	expire_at := time.Now().UTC().Add(d).Unix()
@@ -37,7 +62,7 @@ func NewAccessToken(
 		return tObj, fmt.Errorf("%s: %v", op, err)
 	}
 
-	tObj = &models.Token{
+	tObj = models.Token{
 		Token:     tokenString,
 		Expire_at: expire_at,
 	}
@@ -45,19 +70,26 @@ func NewAccessToken(
 	return tObj, nil
 }
 
-// func NewRefreshToken(
-// 	user models.User,
-// 	app models.App,
-// 	d time.Duration,
-// ) (models.Token, error) {
-// 	tokenObj := &models.Token{}
-// 	expire_at := time.Now().UTC().Add(d).Unix()
+func NewRefreshToken(
+	user models.User,
+	app models.App,
+	d time.Duration,
+) (models.Token, error) {
+	const op = "lib.jwt.NewRefreshToken"
+	const tokenLenght = 32
 
-// 	token := jwt.New(jwt.SigningMethodHS256)
-// 	claims := token.Claims.(jwt.MapClaims)
-// 	claims["user_id"] = user.ID
-// 	claims["app_id"] = app.ID
-// 	claims["exp"] = expire_at
+	tokenBytes := make([]byte, tokenLenght)
+	_, err := rand.Read(tokenBytes)
+	if err != nil {
+		return models.Token{}, fmt.Errorf("%s: %v", op, err)
+	}
 
-// 	ts, err := token.SignedString()
-// }
+	tokenString := base64.URLEncoding.EncodeToString(tokenBytes)
+	expire_at := time.Now().UTC().Add(d).Unix()
+
+	token := models.Token{
+		Token:     tokenString,
+		Expire_at: expire_at,
+	}
+	return token, nil
+}

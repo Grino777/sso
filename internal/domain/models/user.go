@@ -9,7 +9,7 @@ const (
 )
 
 type User struct {
-	ID           int64
+	ID           uint64
 	Username     string
 	Password     string
 	PassHash     []byte

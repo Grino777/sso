@@ -87,8 +87,8 @@ func (rs *RedisStorage) listenConnection() {
 }
 
 func withClient[T any](
-	rs *RedisStorage,
 	ctx context.Context,
+	rs *RedisStorage,
 	fn func(*redis.Client) (T, error),
 ) (T, error) {
 	var zero T

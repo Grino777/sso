@@ -10,57 +10,49 @@ import (
 	"github.com/Grino777/sso/internal/storage/redis"
 )
 
-func GetCachedApp(ctx context.Context,
-	db DBStorage,
-	cache CacheStorage,
+func (s *AuthService) getCachedApp(
+	ctx context.Context,
 	appID uint32,
-) (app *models.App, err error) {
+) (models.App, error) {
 	const op = "services.auth.GetCachedApp"
 
-	app, err = cache.GetApp(ctx, appID)
+	app, err := s.Cache.GetApp(ctx, appID)
 	if err != nil {
 		if !errors.Is(err, redis.ErrCacheNotFound) {
-			return nil, err
+			return app, fmt.Errorf("%s: %w", op, err)
 		}
-	}
-
-	if app == nil {
-		app, err = db.GetApp(ctx, appID)
+		app, err = s.DB.GetApp(ctx, appID)
 		if err != nil {
-			if errors.Is(err, storage.ErrUserNotFound) {
-				return nil, fmt.Errorf("%s: %w", op, ErrInvalidCredentials)
+			if errors.Is(err, storage.ErrAppNotFound) {
+				return models.App{}, fmt.Errorf("%s: %w", op, ErrInvalidCredentials)
 			}
-			return nil, fmt.Errorf("%s: %w", op, err)
+			return models.App{}, fmt.Errorf("%s: %w", op, err)
 		}
-		cache.SaveApp(ctx, app)
+		s.Cache.SaveApp(ctx, app)
 	}
-	return app, err
+	return app, nil
 }
 
-func GetCachedUser(
+func (s *AuthService) getCachedUser(
 	ctx context.Context,
-	db DBStorage,
-	cache CacheStorage,
-	userObj *models.User,
-	app *models.App,
-) (user *models.User, err error) {
+	username string,
+	appID uint32,
+) (user models.User, err error) {
 	const op = "services.auth.GetCachedUser"
 
-	user, err = cache.GetUser(ctx, userObj, app)
+	user, err = s.Cache.GetUser(ctx, username, appID)
 	if err != nil {
 		if !errors.Is(err, redis.ErrCacheNotFound) {
-			return nil, err
+			return user, err
 		}
-	}
-
-	if user == nil {
-		user, err = db.GetUser(ctx, userObj.Username)
+		user, err = s.DB.GetUser(ctx, username)
 		if err != nil {
 			if errors.Is(err, storage.ErrUserNotFound) {
-				return nil, fmt.Errorf("%s: %w", op, ErrInvalidCredentials)
+				return models.User{}, fmt.Errorf("%s: %w", op, ErrInvalidCredentials)
 			}
-			return nil, fmt.Errorf("%s: %w", op, err)
+			return models.User{}, fmt.Errorf("%s: %w", op, err)
 		}
+		s.Cache.SaveUser(ctx, user, appID)
 	}
 	return user, err
 }

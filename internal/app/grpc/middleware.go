@@ -36,7 +36,7 @@ type ReqMetadata struct {
 
 func HMACInterceptor(
 	log *slog.Logger,
-	db auth.DBStorage,
+	db auth.Storage,
 	cache auth.CacheStorage,
 	mode string,
 ) grpc.UnaryServerInterceptor {
@@ -59,7 +59,7 @@ func HMACInterceptor(
 func validateHMAC(ctx context.Context,
 	sLog *slog.Logger,
 	req any,
-	db auth.DBStorage,
+	db auth.Storage,
 	cache auth.CacheStorage,
 	handler grpc.UnaryHandler,
 ) (any, error) {
@@ -147,7 +147,7 @@ func extractMetadata(req any) (rm *ReqMetadata, err error) {
 // Валидирует secret из запроса
 func validateSecret(
 	rm *ReqMetadata,
-	db auth.DBStorage,
+	db auth.Storage,
 	cache auth.CacheStorage,
 ) (bool, error) {
 	ts, err := time.Parse(time.RFC3339, rm.timestamp)

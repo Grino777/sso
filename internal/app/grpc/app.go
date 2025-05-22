@@ -35,7 +35,7 @@ type GRPCApp struct {
 func New(
 	log *slog.Logger,
 	services Services,
-	db auth.DBStorage,
+	db auth.Storage,
 	cache auth.CacheStorage,
 	cfg *config.Config,
 ) *GRPCApp {

@@ -51,61 +51,50 @@ func New(cfg config.RedisConfig, log *slog.Logger) (*RedisStorage, error) {
 
 func (rs *RedisStorage) SaveUser(
 	ctx context.Context,
-	user *models.User,
-	app *models.App,
-) error {
-	_, err := withClient(rs, ctx, func(rc *redis.Client) (struct{}, error) {
-		const op = "redis.SaveUser"
+	user models.User,
+	appID uint32,
+) (models.User, error) {
+	const op = "storage.redis.redis.RedisStorage"
 
+	return withClient(ctx, rs, func(rc *redis.Client) (models.User, error) {
+		user := models.User{}
 		user.Password = ""
 
 		data, err := json.Marshal(user)
 		if err != nil {
-			return struct{}{}, err
+			return user, err
 		}
 
-		resString := fmt.Sprintf("users:%d:%s", app.ID, user.Username)
+		resString := fmt.Sprintf("users:%d:%s", appID, user.Username)
 		err = rc.Set(ctx, resString, data, rs.Cfg.TokenTTL).Err()
 		if err != nil {
-			return struct{}{}, fmt.Errorf("%s: %v", op, err)
+			return user, fmt.Errorf("%s: %v", op, err)
 		}
 		rs.Log.Debug("user successfuly cached", "username", user.Username)
-		return struct{}{}, nil
+		return user, nil
 	})
-
-	return err
 }
 
-func (rs *RedisStorage) GetUser(
-	ctx context.Context,
-	user *models.User,
-	app *models.App,
-) (*models.User, error) {
-	result, err := withClient(
-		rs,
-		ctx,
-		func(rc *redis.Client) (*models.User, error) {
-			resString := fmt.Sprintf("users:%d:%s", app.ID, user.Username)
-			result, err := rc.Get(ctx, resString).Result()
-			if err != nil {
-				if err == redis.Nil {
-					return nil, ErrCacheNotFound
-				}
-				return nil, err
-			}
+func (rs *RedisStorage) GetUser(ctx context.Context, username string, appID uint) (models.User, error) {
+	const op = "storage.redis.GetUser"
 
-			cachedUser := &models.User{}
-			err = json.Unmarshal([]byte(result), &cachedUser)
-			if err != nil {
-				return nil, err
-			}
-			return cachedUser, nil
-		})
+	key := fmt.Sprintf("users:%d:%s", appID, username)
+	result, err := withClient(ctx, rs, func(rc *redis.Client) (string, error) {
+		return rc.Get(ctx, key).Result()
+	})
 	if err != nil {
-		return nil, err
+		if err == redis.Nil {
+			return models.User{}, fmt.Errorf("%s: %w for username %s and appID %d", op, ErrCacheNotFound, username, appID)
+		}
+		return models.User{}, fmt.Errorf("%s: failed to get user: %w", op, err)
 	}
 
-	return result, nil
+	var user models.User
+	if err := json.Unmarshal([]byte(result), &user); err != nil {
+		return models.User{}, fmt.Errorf("%s: failed to unmarshal user: %w", op, err)
+	}
+
+	return user, nil
 }
 
 // FIXME
@@ -124,30 +113,26 @@ func (rs *RedisStorage) IsAdmin(
 func (rs *RedisStorage) GetApp(
 	ctx context.Context,
 	appID uint32,
-) (*models.App, error) {
+) (models.App, error) {
 	const op = "storage.redis.GetApp"
 
-	return withClient(
-		rs,
-		ctx,
-		func(rc *redis.Client) (*models.App, error) {
-			key := fmt.Sprintf("apps:%d", appID)
+	key := fmt.Sprintf("apps:%d", appID)
+	result, err := withClient(ctx, rs, func(rc *redis.Client) (string, error) {
+		return rc.Get(ctx, key).Result()
+	})
+	if err != nil {
+		if err == redis.Nil {
+			return models.App{}, fmt.Errorf("%s: %w for appID %d", op, ErrCacheNotFound, appID)
+		}
+		return models.App{}, fmt.Errorf("%s: failed to get app: %w", op, err)
+	}
 
-			result, err := rc.Get(ctx, key).Result()
-			if err != nil {
-				if err == redis.Nil {
-					return nil, fmt.Errorf("%s: %w for ID %d", op, ErrCacheNotFound, appID)
-				}
+	var app models.App
+	if err := json.Unmarshal([]byte(result), &app); err != nil {
+		return models.App{}, fmt.Errorf("%s: failed to unmarshal user: %w", op, err)
+	}
 
-				return nil, fmt.Errorf("%s: failed to get app %w", op, err)
-			}
-
-			app := &models.App{}
-			if err := json.Unmarshal([]byte(result), &app); err != nil {
-				return nil, fmt.Errorf("%s: failed to unmarshal app %w", op, err)
-			}
-			return app, nil
-		})
+	return app, nil
 }
 
 func (rs *RedisStorage) SaveApp(
