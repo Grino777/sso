@@ -23,7 +23,5 @@ CREATE TABLE
 -- +goose Down
 -- +goose StatementBegin
 DROP TABLE user_apps;
-
 DROP TABLE user_token;
-
 -- +goose StatementEnd

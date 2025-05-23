@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/Grino777/sso/internal/config"
 	"github.com/Grino777/sso/internal/domain/models"
@@ -16,13 +17,17 @@ import (
 	"github.com/mattn/go-sqlite3"
 )
 
+var (
+	ErrRefreshTokenExist = errors.New("refresh token is exist in refresh_tokens table")
+)
+
 type SQLiteStorage struct {
 	driverName string
 	db         *sql.DB
 }
 
 // Creates a new DB session and performs migrations
-func New(driverName string, dbPath string, dbUser config.DBUser) (*SQLiteStorage, error) {
+func New(driverName string, dbPath string, dbUser config.SuperUser) (*SQLiteStorage, error) {
 	const op = "sqlite.New"
 
 	storage := &SQLiteStorage{}
@@ -39,23 +44,16 @@ func New(driverName string, dbPath string, dbUser config.DBUser) (*SQLiteStorage
 		return nil, err
 	}
 
-	if err := sUtils.CreateSuperUser(storage.db, dbUser.User, dbUser.Password); err != nil {
+	if err := sUtils.CreateSuperUser(storage.db, dbUser.Username, dbUser.Password); err != nil {
 		return nil, fmt.Errorf("%s: %v", op, err)
 	}
 
 	return storage, nil
 }
 
-// Close DB session
-func (s *SQLiteStorage) Close() error {
-	s.db.Close()
-	return nil
-}
-
 func (s *SQLiteStorage) SaveUser(
 	ctx context.Context,
-	user *models.User,
-	passHash string,
+	username, passHash string,
 ) error {
 	const op = "storage.SaveUser"
 
@@ -64,7 +62,7 @@ func (s *SQLiteStorage) SaveUser(
 		return fmt.Errorf("%s: %w", op, err)
 	}
 
-	_, err = stmt.ExecContext(ctx, user.Username, passHash)
+	_, err = stmt.ExecContext(ctx, username, passHash)
 	if err != nil {
 		var sqlErr sqlite3.Error
 
@@ -74,12 +72,6 @@ func (s *SQLiteStorage) SaveUser(
 
 		return fmt.Errorf("%s: %w", op, err)
 	}
-
-	// userID, err := res.LastInsertId()
-	// if err != nil {
-	//
-	// }
-
 	return nil
 }
 
@@ -134,15 +126,60 @@ func (s *SQLiteStorage) GetApp(
 // FIXME
 func (s *SQLiteStorage) IsAdmin(
 	ctx context.Context,
-	user *models.User,
+	username string,
 ) (bool, error) {
 	panic("implement me")
 }
 
-func (s *SQLiteStorage) DeleteRefreshToken(token string) error {
-	panic("implement me!")
+func (s *SQLiteStorage) DeleteRefreshToken(
+	ctx context.Context,
+	userID uint64,
+	appID uint32,
+	token models.Token,
+) error {
+	query := `
+        DELETE FROM refresh_tokens WHERE user_id = ? AND app_id = ? AND r_token = ?
+    `
+	_, err := s.db.ExecContext(ctx, query, userID, appID, token.Token)
+	if err != nil {
+		return fmt.Errorf("failed to delete refresh token: %w", err)
+	}
+	return nil
 }
 
-func (s *SQLiteStorage) SaveRefreshToken(token string) error {
-	panic("implement me!")
+func (s *SQLiteStorage) SaveRefreshToken(
+	ctx context.Context,
+	userID uint64,
+	appID uint32,
+	token models.Token,
+) error {
+	const op = "storage.sqlite.sqlite.SaveRefreshToken"
+
+	query := `
+		INSERT INTO refresh_tokens (user_id, app_id, r_token, expire_at)
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT (unique_user_app) DO UPDATE
+		SET r_token = excluded.r_token, expire_at = excluded.expire_at
+	`
+
+	_, err := s.db.ExecContext(ctx, query, userID, appID, token.Token, token.Expire_at)
+	if err != nil {
+		if sqliteErr, ok := err.(sqlite3.Error); ok && sqliteErr.Code == sqlite3.ErrConstraint {
+			if strings.Contains(sqliteErr.Error(), "unique_r_token") {
+				return fmt.Errorf("%s: %w", op, ErrRefreshTokenExist)
+			} else if strings.Contains(sqliteErr.Error(), "unique_user_app") {
+				// В случае конфликта unique_user_app обновление уже выполнено в ON CONFLICT
+				return nil
+			}
+		}
+		return fmt.Errorf("failed to save or update refresh token: %w", err)
+	}
+
+	return nil
+}
+
+// Close DB session
+func (s *SQLiteStorage) Close(ctx context.Context) error {
+	s.db.Close()
+	return nil
 }

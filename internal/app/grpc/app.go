@@ -7,6 +7,7 @@ import (
 	"net"
 
 	"github.com/Grino777/sso/internal/config"
+	"github.com/Grino777/sso/internal/domain/models/interfaces"
 	grpcauth "github.com/Grino777/sso/internal/grpc/auth"
 	grpcjwks "github.com/Grino777/sso/internal/grpc/jwks"
 	"github.com/Grino777/sso/internal/services/auth"
@@ -35,8 +36,8 @@ type GRPCApp struct {
 func New(
 	log *slog.Logger,
 	services Services,
-	db auth.Storage,
-	cache auth.CacheStorage,
+	db interfaces.Storage,
+	cache interfaces.CacheStorage,
 	cfg *config.Config,
 ) *GRPCApp {
 
@@ -55,7 +56,7 @@ func New(
 	gRPCServer := grpc.NewServer(grpc.ChainUnaryInterceptor(
 		recovery.UnaryServerInterceptor(recoverOptions...),
 		logging.UnaryServerInterceptor(InterceptorLogger(log), loggingOpts...),
-		HMACInterceptor(log, db, cache, cfg.Mode),
+		HMACInterceptor(log, services, cfg.Mode),
 	))
 
 	grpcauth.RegServer(gRPCServer, services.Auth())
@@ -101,9 +102,7 @@ func (a *GRPCApp) Run() error {
 	if err := a.gRPCServer.Serve(l); err != nil {
 		return fmt.Errorf("%s: %w", op, err)
 	}
-
 	return nil
-
 }
 
 // GracefulStop gRPC Server
@@ -111,6 +110,5 @@ func (a *GRPCApp) Stop() {
 	const op = "grpcapp.Stop"
 
 	a.log.With(slog.String("op", op)).Info("stoping gRPC server", slog.Int("port", int(a.port)))
-
 	a.gRPCServer.GracefulStop()
 }

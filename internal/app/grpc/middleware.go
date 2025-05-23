@@ -15,7 +15,6 @@ import (
 
 	sso_v1 "github.com/Grino777/sso-proto/gen/go/sso"
 	"github.com/Grino777/sso/internal/lib/logger"
-	"github.com/Grino777/sso/internal/services/auth"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -36,8 +35,7 @@ type ReqMetadata struct {
 
 func HMACInterceptor(
 	log *slog.Logger,
-	db auth.Storage,
-	cache auth.CacheStorage,
+	services Services,
 	mode string,
 ) grpc.UnaryServerInterceptor {
 	return func(
@@ -50,7 +48,7 @@ func HMACInterceptor(
 		case "local":
 			return handler(ctx, req)
 		default:
-			return validateHMAC(ctx, log, req, db, cache, handler)
+			return validateHMAC(ctx, log, req, services, handler)
 		}
 	}
 }
@@ -59,8 +57,7 @@ func HMACInterceptor(
 func validateHMAC(ctx context.Context,
 	sLog *slog.Logger,
 	req any,
-	db auth.Storage,
-	cache auth.CacheStorage,
+	services Services,
 	handler grpc.UnaryHandler,
 ) (any, error) {
 	const op = "grpcapp.middleware.validateHMAC"
@@ -87,7 +84,7 @@ func validateHMAC(ctx context.Context,
 
 	rm.secret = secret
 
-	valid, err := validateSecret(rm, db, cache)
+	valid, err := validateSecret(rm, services)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			log.Error("app not found", "appID", rm.appID)
@@ -147,8 +144,7 @@ func extractMetadata(req any) (rm *ReqMetadata, err error) {
 // Валидирует secret из запроса
 func validateSecret(
 	rm *ReqMetadata,
-	db auth.Storage,
-	cache auth.CacheStorage,
+	services Services,
 ) (bool, error) {
 	ts, err := time.Parse(time.RFC3339, rm.timestamp)
 	if err != nil {
@@ -163,7 +159,9 @@ func validateSecret(
 		return false, fmt.Errorf("%w: current time %v", errInvalidTimestamp, now.Format(time.RFC3339))
 	}
 
-	app, err := auth.GetCachedApp(ctx, db, cache, uint32(rm.appID))
+	auth := services.Auth()
+
+	app, err := auth.GetCachedApp(ctx, uint32(rm.appID))
 	if err != nil {
 		return false, err
 	}

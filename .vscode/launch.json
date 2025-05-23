@@ -13,7 +13,9 @@
             "cwd": "${workspaceFolder}",
             "args": [
                 "--mode",
-                "local"
+                "local",
+                "--db",
+                "postgres"
             ]
         }
     ]

@@ -18,7 +18,7 @@ import (
 
 // Методы для работы с бизнес-логикой
 type AuthService interface {
-	Login(ctx context.Context, username string, password string, appID uint32) (token *models.Token, err error)
+	Login(ctx context.Context, username string, password string, appID uint32) (token models.Tokens, err error)
 	Logout(ctx context.Context, token string) (success bool, err error)
 	Register(ctx context.Context, username string, password string) error
 	IsAdmin(ctx context.Context, username string) (isAdmin bool, err error)
@@ -40,13 +40,12 @@ func (s *AuthServer) Login(
 	ctx context.Context,
 	req *sso_v1.LoginRequest,
 ) (*sso_v1.LoginResponse, error) {
-	token, err := s.auth.Login(ctx, req.GetUsername(), req.GetPassword(), req.Metadata.GetAppId())
+	tokens, err := s.auth.Login(ctx, req.GetUsername(), req.GetPassword(), req.Metadata.GetAppId())
 	if err != nil {
 		var valErr *models.ValidationError
 		if errors.As(err, &valErr) {
 			return nil, status.Error(codes.InvalidArgument, valErr.Error())
 		}
-
 		if errors.Is(err, auth.ErrInvalidCredentials) {
 			return nil, status.Error(codes.InvalidArgument, "invalid login or password")
 		}
@@ -55,9 +54,13 @@ func (s *AuthServer) Login(
 
 	return &sso_v1.LoginResponse{
 		AccessToken: &sso_v1.UserToken{
-			Token:     token.Token,
-			ExpiredAt: strconv.FormatInt(token.Expire_at, 10),
-		}, // FIXME
+			Token:     tokens.AccessToken.Token,
+			ExpiredAt: strconv.FormatInt(tokens.AccessToken.Expire_at, 10),
+		},
+		RefreshToken: &sso_v1.UserToken{
+			Token:     tokens.RefreshToken.Token,
+			ExpiredAt: strconv.FormatInt(tokens.RefreshToken.Expire_at, 10),
+		},
 	}, nil
 
 }

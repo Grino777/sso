@@ -19,6 +19,8 @@ var (
 	ErrCacheNotFound = errors.New("data not cached")
 )
 
+const opRedis = "storage.redis.redis."
+
 type RedisStorage struct {
 	Mu         sync.RWMutex
 	Cfg        config.RedisConfig
@@ -28,8 +30,8 @@ type RedisStorage struct {
 	Log        *slog.Logger
 }
 
-func New(cfg config.RedisConfig, log *slog.Logger) (*RedisStorage, error) {
-	const op = "storage.redis.New"
+func NewCacheStorage(cfg config.RedisConfig, log *slog.Logger) (*RedisStorage, error) {
+	const op = opRedis + "NewCacheStorage"
 
 	store := &RedisStorage{
 		Cfg:        cfg,
@@ -54,29 +56,32 @@ func (rs *RedisStorage) SaveUser(
 	user models.User,
 	appID uint32,
 ) (models.User, error) {
-	const op = "storage.redis.redis.RedisStorage"
+	const op = opRedis + "SaveUser"
 
 	return withClient(ctx, rs, func(rc *redis.Client) (models.User, error) {
-		user := models.User{}
 		user.Password = ""
 
 		data, err := json.Marshal(user)
 		if err != nil {
-			return user, err
+			return models.User{}, err
 		}
 
 		resString := fmt.Sprintf("users:%d:%s", appID, user.Username)
 		err = rc.Set(ctx, resString, data, rs.Cfg.TokenTTL).Err()
 		if err != nil {
-			return user, fmt.Errorf("%s: %v", op, err)
+			return models.User{}, fmt.Errorf("%s: %v", op, err)
 		}
 		rs.Log.Debug("user successfuly cached", "username", user.Username)
-		return user, nil
+		return models.User{}, nil
 	})
 }
 
-func (rs *RedisStorage) GetUser(ctx context.Context, username string, appID uint) (models.User, error) {
-	const op = "storage.redis.GetUser"
+func (rs *RedisStorage) GetUser(
+	ctx context.Context,
+	username string,
+	appID uint32,
+) (models.User, error) {
+	const op = opRedis + "GetUser"
 
 	key := fmt.Sprintf("users:%d:%s", appID, username)
 	result, err := withClient(ctx, rs, func(rc *redis.Client) (string, error) {
@@ -100,8 +105,8 @@ func (rs *RedisStorage) GetUser(ctx context.Context, username string, appID uint
 // FIXME
 func (rs *RedisStorage) IsAdmin(
 	ctx context.Context,
-	user *models.User,
-	app *models.App,
+	user models.User,
+	app models.App,
 ) (bool, error) {
 	panic("implement me!")
 }
@@ -114,7 +119,7 @@ func (rs *RedisStorage) GetApp(
 	ctx context.Context,
 	appID uint32,
 ) (models.App, error) {
-	const op = "storage.redis.GetApp"
+	const op = opRedis + "GetApp"
 
 	key := fmt.Sprintf("apps:%d", appID)
 	result, err := withClient(ctx, rs, func(rc *redis.Client) (string, error) {
@@ -137,37 +142,40 @@ func (rs *RedisStorage) GetApp(
 
 func (rs *RedisStorage) SaveApp(
 	ctx context.Context,
-	app *models.App,
+	app models.App,
 ) error {
-	const op = "storage.redis.SaveApp"
+	const op = opRedis + "SaveApp"
 
 	key := fmt.Sprintf("apps:%d", app.ID)
+	_, err := withClient(ctx, rs, func(rc *redis.Client) (models.App, error) {
+		data, err := json.Marshal(app)
+		if err != nil {
+			return models.App{}, fmt.Errorf("%s: %v", op, err)
+		}
 
-	data, err := json.Marshal(app)
+		_, err = rc.Set(ctx, key, data, 0).Result()
+		if err != nil {
+			return models.App{}, fmt.Errorf("%s: %v", op, err)
+		}
+
+		rs.Log.Info("app added to cache", "appID", app.ID)
+		return models.App{}, nil
+	})
 	if err != nil {
 		return fmt.Errorf("%s: %v", op, err)
 	}
-
-	_, err = rs.Client.Set(ctx, key, data, 0).Result()
-	if err != nil {
-		return fmt.Errorf("%s: %v", op, err)
-	}
-
-	rs.Log.Info("app added to cache", "appID", app.ID)
-
 	return nil
 }
 
 // -----------------------------------End Block------------------------------------
 
 // Close Redis session
-func (rs *RedisStorage) Close() error {
+func (rs *RedisStorage) Close(ctx context.Context) error {
 	rs.Mu.Lock()
 	defer rs.Mu.Unlock()
 
 	if rs.Client != nil {
 		rs.Client.Close()
 	}
-
 	return nil
 }

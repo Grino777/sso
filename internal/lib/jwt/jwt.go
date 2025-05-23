@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/Grino777/sso/internal/config"
 	"github.com/Grino777/sso/internal/domain/models"
 	jwksM "github.com/Grino777/sso/internal/services/jwks/models"
 
@@ -16,15 +17,14 @@ func CreateNewTokens(
 	user models.User,
 	app models.App,
 	pk *jwksM.PrivateKey,
-	atd time.Duration, // acess token duration
-	rtd time.Duration, // refresh token duration
+	tokens config.TokenConfig,
 ) (models.Tokens, error) {
-	acessToken, err := NewAccessToken(user, app, pk, atd)
+	acessToken, err := NewAccessToken(user, app, pk, tokens.TokenTTL)
 	if err != nil {
 		return models.Tokens{}, err
 	}
 
-	refreshToken, err := NewRefreshToken(user, app, rtd)
+	refreshToken, err := NewRefreshToken(tokens.RefreshTokenTTL)
 	if err != nil {
 		return models.Tokens{}, err
 	}
@@ -70,11 +70,7 @@ func NewAccessToken(
 	return tObj, nil
 }
 
-func NewRefreshToken(
-	user models.User,
-	app models.App,
-	d time.Duration,
-) (models.Token, error) {
+func NewRefreshToken(d time.Duration) (models.Token, error) {
 	const op = "lib.jwt.NewRefreshToken"
 	const tokenLenght = 32
 

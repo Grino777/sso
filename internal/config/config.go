@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -14,9 +15,9 @@ import (
 
 // Константы для режимов окружения
 const (
-	EnvLocal = "local"
-	EnvDev   = "dev"
-	EnvProd  = "prod"
+	LocalMode = "local"
+	DevMode   = "dev"
+	ProdMode  = "prod"
 )
 
 // Константы для путей к конфигурационным файлам
@@ -28,33 +29,91 @@ const (
 
 // Константы для переменных окружения
 const (
-	dbUserEnv  = "DB_USER"
-	dbPassEnv  = "DB_PASSWORD"
-	keysDirEnv = "KEYS_DIR"
+	suUsernameEnv = "DB_USER"
+	suPassEnv     = "DB_PASSWORD"
+	keysDirEnv    = "KEYS_DIR"
 )
+
+// Константы с кредами для Postgres
+const (
+	pgUser = "PG_USER"
+	pgPass = "PG_PASS"
+	pgHost = "PG_HOST"
+	pgPort = "PG_PORT"
+)
+
+// Константы для типов баз данных
+const (
+	DBTypePostgres = "postgres"
+	DBTypeSQLite   = "sqlite"
+)
+
+const configOp = "config.config."
+
+var (
+	ErrModeFlag = errors.New("invalid mode flag")
+	ErrDbFlag   = errors.New("invalid db flag")
+)
+
+var (
+	// Глобальные переменные для кэширования конфигурации
+	config    *Config
+	configErr error
+	once      sync.Once
+	flagSet   *flag.FlagSet
+	modeFlag  string
+	dbFlag    string
+)
+
+var envMapping = map[string]func(*Config, string){
+	suUsernameEnv: func(c *Config, v string) { c.SuperUser.Username = v },
+	suPassEnv:     func(c *Config, v string) { c.SuperUser.Password = v },
+	keysDirEnv:    func(c *Config, v string) { c.FS.KeysDir = v },
+}
+
+var envPGMapping = map[string]func(*Config, string){
+	pgUser: func(c *Config, v string) { c.Database.DBUser = v },
+	pgPass: func(c *Config, v string) { c.Database.DBPass = v },
+	pgHost: func(c *Config, v string) { c.Database.DBHost = v },
+	pgPort: func(c *Config, v string) { c.Database.DBPort = v },
+}
 
 // Config представляет конфигурацию приложения.
 type Config struct {
-	Mode            string        // Режим работы приложения (local, dev, prod)
-	DB              DBConfig      `yaml:"db" env-required:"true"`
-	Redis           RedisConfig   `yaml:"redis" env-required:"true"`
-	GRPC            GRPCConfig    `yaml:"grpc" env-required:"true"`
+	Mode      string
+	GRPC      GRPCConfig `yaml:"grpc" env-required:"true"`
+	Database  DatabaseConfig
+	Redis     RedisConfig `yaml:"redis" env-required:"true"`
+	Tokens    TokenConfig
+	FS        FileSystemConfig
+	SuperUser SuperUser
+}
+
+type DatabaseConfig struct {
+	DBType           string
+	DBName           string `yaml:"db_name" env-default:"sso"`
+	LocalStoragePath string `yaml:"local_storage_path" env-default:"./storage/sso.sqlite3"`
+	DBUser           string
+	DBPass           string
+	DBHost           string
+	DBPort           string
+}
+
+type TokenConfig struct {
 	TokenTTL        time.Duration `yaml:"tokenTTL" env-default:"1h"`
 	RefreshTokenTTL time.Duration `yaml:"refreshTokenTTL" env-default:"168h"`
-	DBUser          DBUser
-	BaseDir         string
-	KeysDir         string
 }
 
-// DBUser содержит учетные данные для подключения к базе данных.
-type DBUser struct {
-	User     string
+type FileSystemConfig struct {
+	BaseDir    string
+	KeysDir    string
+	ConfigPath string
+}
+
+// Пользователь с ролью superuser для взаимодействия с GRPC
+type SuperUser struct {
+	Username string
 	Password string
-}
-
-// DBConfig содержит настройки базы данных.
-type DBConfig struct {
-	StoragePath string `yaml:"storage_path" env-required:"true"`
 }
 
 // GRPCConfig содержит настройки gRPC-сервера.
@@ -76,30 +135,25 @@ type RedisConfig struct {
 	TokenTTL    time.Duration `yaml:"tokenTTL" env-default:"1h"`
 }
 
-var envMapping = map[string]func(*Config, string){
-	dbUserEnv:  func(c *Config, v string) { c.DBUser.User = v },
-	dbPassEnv:  func(c *Config, v string) { c.DBUser.Password = v },
-	keysDirEnv: func(c *Config, v string) { c.KeysDir = v },
+// GetFlagSet возвращает flagSet для использования в других пакетах.
+func GetFlagSet() *flag.FlagSet {
+	return flagSet
 }
 
-var (
-	// Глобальные переменные для кэширования конфигурации
-	config    *Config
-	configErr error
-	once      sync.Once
-	flagSet   *flag.FlagSet
-	mode      string
-)
+// GetModeFlag возвращает значение флага mode.
+func GetModeFlag() string {
+	return modeFlag
+}
 
-func init() {
-	flagSet = flag.NewFlagSet("sso", flag.ContinueOnError)
-	flagSet.StringVar(&mode, "mode", "", "application mode (local, dev, prod)")
+// GetDbFlag возвращает значение флага db.
+func GetDbFlag() string {
+	return dbFlag
 }
 
 // Load загружает конфигурацию приложения из флагов, переменных окружения и YAML-файла.
 // Вызывается однократно благодаря sync.Once.
 func Load() (*Config, error) {
-	const op = "config.Load"
+	const op = configOp + "Load"
 
 	once.Do(func() {
 		config, configErr = loadConfig()
@@ -112,37 +166,77 @@ func Load() (*Config, error) {
 	return config, nil
 }
 
+func parseFlag(cfg *Config) error {
+	const op = configOp + "parseFlag"
+
+	flagSet := flag.NewFlagSet("myprogram", flag.ContinueOnError)
+	flagSet.StringVar(&modeFlag, "mode", "", "application mode (local, dev, prod)")
+	flagSet.StringVar(&dbFlag, "db", "", "database type (postgres, sqlite)")
+
+	if err := flagSet.Parse(os.Args[1:]); err != nil {
+		if err == flag.ErrHelp {
+			return err
+		}
+		return fmt.Errorf("%s: failed to parse flags: %w", op, err)
+	}
+	if err := validateModeFlag(modeFlag, cfg); err != nil {
+		return err
+	}
+	if err := validateDbFlag(dbFlag, cfg); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateModeFlag(modeFlag string, cfg *Config) error {
+	// const op = configOp + "validateMode"
+
+	switch modeFlag {
+	case LocalMode, DevMode, ProdMode:
+		cfg.Mode = modeFlag
+	default:
+		return ErrModeFlag
+	}
+	return nil
+}
+
+func validateDbFlag(dbFlag string, cfg *Config) error {
+	// const op = configOp + "validateDbFlag"
+
+	switch dbFlag {
+	case DBTypePostgres, DBTypeSQLite:
+		cfg.Database.DBType = dbFlag
+	default:
+		return ErrDbFlag
+	}
+	return nil
+}
+
 func loadConfig() (*Config, error) {
-	const op = "config.loadConfig"
+	const op = configOp + "loadConfig"
 
 	cfg := &Config{}
 
-	if err := flagSet.Parse(os.Args[1:]); err != nil {
-		return nil, fmt.Errorf("%s: failed to parse flags: %w", op, err)
+	if err := parseFlag(cfg); err != nil {
+		return nil, err
 	}
-
-	if mode == "" {
-		return nil, fmt.Errorf("%s: mode not specified", op)
-	}
-	cfg.Mode = mode
 
 	if err := godotenv.Load(); err != nil {
 		return nil, fmt.Errorf("%s: failed to load .env file: %w", op, err)
 	}
 
-	configPath, err := configPath(cfg.Mode)
-	if err != nil {
+	if err := configPath(cfg); err != nil {
 		return nil, fmt.Errorf("%s: %w", op, err)
 	}
 
-	if _, err := os.Stat(configPath); err != nil {
+	if _, err := os.Stat(cfg.FS.ConfigPath); err != nil {
 		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("%s: config file does not exist: %s", op, configPath)
+			return nil, fmt.Errorf("%s: config file does not exist: %s", op, cfg.FS.ConfigPath)
 		}
 		return nil, fmt.Errorf("%s: cannot stat config file: %w", op, err)
 	}
 
-	if err := cleanenv.ReadConfig(configPath, cfg); err != nil {
+	if err := cleanenv.ReadConfig(cfg.FS.ConfigPath, cfg); err != nil {
 		return nil, fmt.Errorf("%s: failed to read config file: %w", op, err)
 	}
 
@@ -150,7 +244,7 @@ func loadConfig() (*Config, error) {
 		return nil, fmt.Errorf("%s: failed to parse environment variables: %w", op, err)
 	}
 
-	if err := setBaseDir(cfg, configPath); err != nil {
+	if err := setBaseDir(cfg, cfg.FS.ConfigPath); err != nil {
 		return nil, fmt.Errorf("%s: %w", op, err)
 	}
 
@@ -159,25 +253,46 @@ func loadConfig() (*Config, error) {
 	return cfg, nil
 }
 
-func configPath(mode string) (string, error) {
-	const op = "config.configPath"
+func configPath(cfg *Config) error {
+	const op = configOp + "configPath"
 
-	switch mode {
-	case EnvLocal:
-		return localConfigPath, nil
-	case EnvDev:
-		return devConfigPath, nil
-	case EnvProd:
-		return prodConfigPath, nil
+	switch cfg.Mode {
+	case LocalMode:
+		cfg.FS.ConfigPath = localConfigPath
+	case DevMode:
+		cfg.FS.ConfigPath = devConfigPath
+	case ProdMode:
+		cfg.FS.ConfigPath = prodConfigPath
 	default:
-		return "", fmt.Errorf("%s: invalid mode: %s", op, mode)
+		return fmt.Errorf("%s: invalid mode: %s", op, cfg.Mode)
 	}
+	return nil
 }
 
 func parseEnv(cfg *Config) error {
-	const op = "config.parseEnv"
+	const op = configOp + "parseEnv"
 
 	for envKey, setter := range envMapping {
+		value, err := getEnvValue(envKey)
+		if err != nil {
+			return fmt.Errorf("%s: %w", op, err)
+		}
+		setter(cfg, value)
+	}
+
+	if cfg.Database.DBType == DBTypePostgres {
+		if err := parseEnvPG(cfg); err != nil {
+			return fmt.Errorf("%s: %w", op, err)
+		}
+	}
+
+	return nil
+}
+
+func parseEnvPG(cfg *Config) error {
+	const op = configOp + "parsePgVariables"
+
+	for envKey, setter := range envPGMapping {
 		value, err := getEnvValue(envKey)
 		if err != nil {
 			return fmt.Errorf("%s: %w", op, err)
@@ -188,7 +303,7 @@ func parseEnv(cfg *Config) error {
 }
 
 func getEnvValue(key string) (string, error) {
-	const op = "config.getEnvValue"
+	const op = configOp + "getEnvValue"
 
 	value := os.Getenv(key)
 	if value == "" {
@@ -198,17 +313,17 @@ func getEnvValue(key string) (string, error) {
 }
 
 func setBaseDir(cfg *Config, configPath string) error {
-	const op = "config.setBaseDir"
+	const op = configOp + "setBaseDir"
 
 	absPath, err := filepath.Abs(configPath)
 	if err != nil {
 		return fmt.Errorf("%s: cannot get absolute path: %w", op, err)
 	}
 
-	cfg.BaseDir = filepath.Dir(filepath.Dir(absPath))
+	cfg.FS.BaseDir = filepath.Dir(filepath.Dir(absPath))
 	return nil
 }
 
 func setKeysDir(cfg *Config) {
-	cfg.KeysDir = filepath.Join(cfg.BaseDir, "keys")
+	cfg.FS.KeysDir = filepath.Join(cfg.FS.BaseDir, "keys")
 }

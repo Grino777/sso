@@ -1,6 +1,7 @@
 mode: "local"
 db:
-  storage_path: "./storage/sso.sqlite3"
+  local_storage_path: "./storage/sso.sqlite3"
+  db_name: "sso"
 grpc:
   url: "127.0.0.1"
   port: 8088

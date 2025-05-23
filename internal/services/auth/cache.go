@@ -10,11 +10,13 @@ import (
 	"github.com/Grino777/sso/internal/storage/redis"
 )
 
-func (s *AuthService) getCachedApp(
+const cacheOp = "services.auth.cache."
+
+func (s *AuthService) GetCachedApp(
 	ctx context.Context,
 	appID uint32,
 ) (models.App, error) {
-	const op = "services.auth.GetCachedApp"
+	const op = cacheOp + "GetCachedApp"
 
 	app, err := s.Cache.GetApp(ctx, appID)
 	if err != nil {
@@ -33,12 +35,12 @@ func (s *AuthService) getCachedApp(
 	return app, nil
 }
 
-func (s *AuthService) getCachedUser(
+func (s *AuthService) GetCachedUser(
 	ctx context.Context,
 	username string,
 	appID uint32,
 ) (user models.User, err error) {
-	const op = "services.auth.GetCachedUser"
+	const op = cacheOp + "GetCachedUser"
 
 	user, err = s.Cache.GetUser(ctx, username, appID)
 	if err != nil {

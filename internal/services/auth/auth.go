@@ -3,17 +3,18 @@ package auth
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
-	"time"
 
+	"github.com/Grino777/sso/internal/config"
 	"github.com/Grino777/sso/internal/domain/models"
+	"github.com/Grino777/sso/internal/domain/models/interfaces"
 	"github.com/Grino777/sso/internal/lib/jwt"
 	"github.com/Grino777/sso/internal/lib/logger"
 	jwksM "github.com/Grino777/sso/internal/services/jwks/models"
 	"github.com/Grino777/sso/internal/storage"
+	"github.com/Grino777/sso/internal/storage/sqlite"
 	authU "github.com/Grino777/sso/internal/utils/auth"
 
 	"golang.org/x/crypto/bcrypt"
@@ -23,81 +24,28 @@ var (
 	ErrInvalidCredentials = errors.New("invalid credentials")
 )
 
-// ---------------------------------DB Interfaces----------------------------------
-
-type Storage interface {
-	StorageUserProvider
-	StorageAppProvider
-	StorageTokenProvider
-	Closer
-}
-
-type StorageUserProvider interface {
-	SaveUser(ctx context.Context, user models.User, passHash string) error
-	GetUser(ctx context.Context, username string) (models.User, error)
-	IsAdmin(ctx context.Context, user models.User) (bool, error)
-}
-
-type StorageAppProvider interface {
-	GetApp(ctx context.Context, appID uint32) (models.App, error)
-}
-
-type StorageTokenProvider interface {
-	DeleteRefreshToken(userID uint64, appID uint32, token string) error
-	SaveRefreshToken(userID uint64, appID uint32, token string) error
-}
-
-type Closer interface {
-	Close() error
-}
-
-// -----------------------------------End Block------------------------------------
-
-// --------------------------------Cache Interfaces--------------------------------
-
-type CacheStorage interface {
-	CacheUserProvider
-	CacheAppProvider
-	Closer
-}
-
-type CacheUserProvider interface {
-	GetUser(ctx context.Context, username string, appID uint32) (models.User, error)
-	SaveUser(ctx context.Context, user models.User, appID uint32) (models.User, error)
-	IsAdmin(ctx context.Context, user models.User, app models.App) (bool, error)
-}
-
-type CacheAppProvider interface {
-	GetApp(ctx context.Context, appID uint32) (models.App, error)
-	SaveApp(ctx context.Context, app models.App) error
-}
-
 type JwksProvider interface {
 	GetLatestPrivateKey(ctx context.Context) (*jwksM.PrivateKey, error)
 }
 
-// -----------------------------------End Block------------------------------------
-
 // Объект для взаимодейсвтия с БД
 type AuthService struct {
-	Log             *slog.Logger
-	DB              Storage
-	Cache           CacheStorage
-	TokenTTL        time.Duration
-	RefreshTokenTTL time.Duration
-	JwksService     JwksProvider
+	Log         *slog.Logger
+	DB          interfaces.Storage
+	Cache       interfaces.CacheStorage
+	Tokens      config.TokenConfig
+	JwksService JwksProvider
 }
 
 func New(
 	authConfigs AuthService,
 ) *AuthService {
 	return &AuthService{
-		Log:             authConfigs.Log,
-		DB:              authConfigs.DB,
-		Cache:           authConfigs.Cache,
-		TokenTTL:        authConfigs.TokenTTL,
-		RefreshTokenTTL: authConfigs.RefreshTokenTTL,
-		JwksService:     authConfigs.JwksService,
+		Log:         authConfigs.Log,
+		DB:          authConfigs.DB,
+		Cache:       authConfigs.Cache,
+		Tokens:      authConfigs.Tokens,
+		JwksService: authConfigs.JwksService,
 	}
 }
 
@@ -120,7 +68,7 @@ func (s *AuthService) Login(
 		return models.Tokens{}, err
 	}
 
-	user, err := s.getCachedUser(ctx, username, appID)
+	user, err := s.GetCachedUser(ctx, username, appID)
 	if err != nil {
 		log.Error("%s: %w", op, err)
 		return models.Tokens{}, fmt.Errorf("%s: %w", op, err)
@@ -135,7 +83,7 @@ func (s *AuthService) Login(
 		return models.Tokens{}, fmt.Errorf("%s: %w", op, err)
 	}
 
-	app, err := s.getCachedApp(ctx, appID)
+	app, err := s.GetCachedApp(ctx, appID)
 	if err != nil {
 		log.Error("%s: %w", op, err)
 		return models.Tokens{}, fmt.Errorf("%s: %w", op, err)
@@ -147,14 +95,26 @@ func (s *AuthService) Login(
 		return models.Tokens{}, err
 	}
 
-	tokens, err := jwt.CreateNewTokens(user, app, privateKey, s.TokenTTL, s.RefreshTokenTTL)
+	tokens, err := jwt.CreateNewTokens(user, app, privateKey, s.Tokens)
 	if err != nil {
 		log.Error("%s: %w", op, err)
 		return models.Tokens{}, err
 	}
 
-	if err := s.DB.SaveRefreshToken(user.ID, appID, tokens.RefreshToken.Token); err != nil {
-		if errors.Is()
+	for {
+		if err := s.DB.SaveRefreshToken(ctx, user.ID, appID, tokens.RefreshToken); err != nil {
+			if errors.Is(err, sqlite.ErrRefreshTokenExist) {
+				s.Log.Debug("refresh token already exists, generating new token")
+				refreshToken, err := jwt.NewRefreshToken(s.Tokens.RefreshTokenTTL)
+				if err != nil {
+					s.Log.Error("failed to generate new refresh token", logger.Error(err))
+					return models.Tokens{}, fmt.Errorf("%s: failed to generate new refresh token: %w", op, err)
+				}
+				tokens.RefreshToken = refreshToken
+			}
+			s.Log.Debug("refresh token updated")
+			break
+		}
 	}
 
 	_, err = s.Cache.SaveUser(ctx, user, appID)
@@ -199,13 +159,13 @@ func (s *AuthService) Register(
 		return err
 	}
 
-	passHash, err := authU.CreatePassHash(user.Password)
+	passHash, err := authU.CreatePassHash(password)
 	if err != nil {
 		log.Error("failed to generate pass hash %v", logger.Error(err))
 		return fmt.Errorf("%s: %v", op, err)
 	}
 
-	err = s.DB.SaveUser(ctx, user, passHash)
+	err = s.DB.SaveUser(ctx, username, passHash)
 	if err != nil {
 		log.Error("failed to save user", logger.Error(err))
 
