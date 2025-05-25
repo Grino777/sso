@@ -12,10 +12,11 @@
             "program": "${workspaceFolder}/cmd/sso/main.go",
             "cwd": "${workspaceFolder}",
             "args": [
+                // "--h"
                 "--mode",
                 "local",
                 "--db",
-                "postgres"
+                "sqlite"
             ]
         }
     ]

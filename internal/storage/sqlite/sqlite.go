@@ -158,18 +158,15 @@ func (s *SQLiteStorage) SaveRefreshToken(
 	query := `
 		INSERT INTO refresh_tokens (user_id, app_id, r_token, expire_at)
 		VALUES (?, ?, ?, ?)
-		ON CONFLICT (unique_user_app) DO UPDATE
+		ON CONFLICT (user_id, app_id) DO UPDATE
 		SET r_token = excluded.r_token, expire_at = excluded.expire_at
 	`
 
 	_, err := s.db.ExecContext(ctx, query, userID, appID, token.Token, token.Expire_at)
 	if err != nil {
 		if sqliteErr, ok := err.(sqlite3.Error); ok && sqliteErr.Code == sqlite3.ErrConstraint {
-			if strings.Contains(sqliteErr.Error(), "unique_r_token") {
+			if strings.Contains(sqliteErr.Error(), "refresh_tokens.r_token") {
 				return fmt.Errorf("%s: %w", op, ErrRefreshTokenExist)
-			} else if strings.Contains(sqliteErr.Error(), "unique_user_app") {
-				// В случае конфликта unique_user_app обновление уже выполнено в ON CONFLICT
-				return nil
 			}
 		}
 		return fmt.Errorf("failed to save or update refresh token: %w", err)

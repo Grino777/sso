@@ -59,8 +59,6 @@ func (rs *RedisStorage) SaveUser(
 	const op = opRedis + "SaveUser"
 
 	return withClient(ctx, rs, func(rc *redis.Client) (models.User, error) {
-		user.Password = ""
-
 		data, err := json.Marshal(user)
 		if err != nil {
 			return models.User{}, err

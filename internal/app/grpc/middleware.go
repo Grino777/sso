@@ -28,7 +28,7 @@ var (
 )
 
 type ReqMetadata struct {
-	appID     int
+	appID     uint64
 	timestamp string
 	secret    string
 }
@@ -70,7 +70,7 @@ func validateHMAC(ctx context.Context,
 		return nil, status.Error(codes.Unauthenticated, "unauthenticated")
 	}
 
-	secret, err := appSecret(md)
+	secret, err := getAppSecret(md)
 	if err != nil {
 		log.Error("error: %v", logger.Error(err))
 		return nil, status.Error(codes.Unauthenticated, err.Error())
@@ -78,38 +78,39 @@ func validateHMAC(ctx context.Context,
 
 	rm, err := extractMetadata(req)
 	if err != nil {
-		log.Error("error: %v", logger.Error(err))
+		log.Error("failed to extract metadata", logger.Error(err))
 		return nil, err
 	}
 
 	rm.secret = secret
+	log = log.With(slog.Uint64("app_id", rm.appID))
 
 	valid, err := validateSecret(rm, services)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			log.Error("app not found", "appID", rm.appID)
+			log.Error("app not found")
 		}
 
-		log.Error("failed to parse timestamp", "appID", rm.appID, "timestamp", rm.timestamp, "error", err.Error())
-
+		log.Error(
+			"failed to parse timestamp",
+			slog.String("timestamp", rm.timestamp),
+			logger.Error(err))
 		return nil, status.Error(codes.Unauthenticated, "invalid data transmitted")
 	}
 	if !valid {
-		log.Error("invalid HMAC", "appID", rm.appID)
-
+		log.Error("invalid HMAC")
 		return nil, status.Error(codes.Unauthenticated, "invalid data transmitted")
 	}
 
-	log.Debug("HMAC validated",
-		slog.Uint64("appID", uint64(rm.appID)),
+	log.Debug(
+		"HMAC validated",
 		slog.String("timestamp", rm.timestamp),
 	)
-
 	return handler(ctx, req)
 }
 
 // Получает secret из запроса
-func appSecret(md metadata.MD) (secret string, err error) {
+func getAppSecret(md metadata.MD) (secret string, err error) {
 	appSecret, exist := md["authorization"]
 	if !exist || len(appSecret) == 0 {
 		return "", errAppSecret
@@ -134,7 +135,7 @@ func extractMetadata(req any) (rm *ReqMetadata, err error) {
 	metadata := metadataField.Interface().(*sso_v1.AuthMetadata)
 
 	return &ReqMetadata{
-		appID:     int(metadata.AppId),
+		appID:     uint64(metadata.AppId),
 		timestamp: metadata.Timestamp,
 		secret:    "",
 	}, nil
@@ -152,7 +153,7 @@ func validateSecret(
 	}
 
 	ctx := context.Background()
-	data := ts.Format(time.RFC3339) + strconv.Itoa(rm.appID)
+	data := ts.Format(time.RFC3339) + strconv.FormatUint(rm.appID, 10)
 
 	now := time.Now().UTC()
 	if ts.Before(now.Add(-2*time.Minute)) || ts.After(now.Add(5*time.Second)) {

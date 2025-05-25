@@ -11,6 +11,7 @@ import (
 	grpcapp "github.com/Grino777/sso/internal/app/grpc"
 	"github.com/Grino777/sso/internal/config"
 	"github.com/Grino777/sso/internal/domain/models/interfaces"
+	"github.com/Grino777/sso/internal/lib/logger"
 	"github.com/Grino777/sso/internal/services/auth"
 	"github.com/Grino777/sso/internal/services/jwks"
 	"github.com/Grino777/sso/internal/storage/postgres"
@@ -55,24 +56,13 @@ func (s *AppServices) Jwks() *jwks.JwksService {
 }
 
 func New(
-	log *slog.Logger,
+	logger *slog.Logger,
 ) (*SSOApp, error) {
-	const op = "app.New"
+	app := &SSOApp{Ctx: context.Background(), Logger: logger}
 
-	app := &SSOApp{Ctx: context.Background(), Logger: log}
-
-	if err := loadConfig(app); err != nil {
-		if err == flag.ErrHelp {
-			return nil, err
-		}
-		return nil, fmt.Errorf("%s: %v", op, err)
-	}
-	if err := initDB(app); err != nil {
-		return nil, fmt.Errorf("%s: %v", op, err)
-	}
-	if err := initCache(app); err != nil {
-		return nil, fmt.Errorf("%s: %v", op, err)
-	}
+	loadConfig(app)
+	initDB(app)
+	initCache(app)
 
 	services := initServices(app)
 	initGRPCServer(app, services)
@@ -86,13 +76,13 @@ func (a *SSOApp) Stop() {
 	log := a.Logger.With(slog.String("op", op))
 
 	if err := a.Storage.Close(a.Ctx); err != nil {
-		log.Error("failed to close db session", slog.String("error", err.Error()))
+		log.Error("failed to close db session", logger.Error(err))
 	} else {
 		log.Debug("db session closed")
 	}
 
 	if err := a.CacheStorage.Close(a.Ctx); err != nil {
-		log.Error("failed to close redis session", slog.String("error", err.Error()))
+		log.Error("failed to close redis session", logger.Error(err))
 	} else {
 		log.Debug("redis session closed")
 	}
@@ -101,6 +91,8 @@ func (a *SSOApp) Stop() {
 func initDB(a *SSOApp) error {
 	const op = "grpc.app.initDb"
 
+	log := a.Logger.With(slog.String("op", op))
+
 	var db interfaces.Storage
 	var err error
 
@@ -108,10 +100,9 @@ func initDB(a *SSOApp) error {
 	case DBTypePostgres:
 		db, err = postgres.NewPostgresStorage(a.Ctx, a.Config.Database)
 		if err != nil {
-			a.Logger.Error(
+			log.Error(
 				"failed to initialize Postgres storage",
-				slog.String("op", op),
-				slog.String("error", err.Error()),
+				logger.Error(err),
 			)
 			os.Exit(1)
 		}
@@ -119,8 +110,7 @@ func initDB(a *SSOApp) error {
 		if err := storageU.CheckStorageFolder(); err != nil {
 			a.Logger.Error(
 				"failed to check storage folder",
-				slog.String("op", op),
-				slog.String("error", err.Error()),
+				logger.Error(err),
 			)
 			os.Exit(1)
 		}
@@ -128,36 +118,34 @@ func initDB(a *SSOApp) error {
 		if err != nil {
 			a.Logger.Error(
 				"failed to initialize SQLite storage",
-				slog.String("op", op),
-				slog.String("error", err.Error()),
+				logger.Error(err),
 			)
 			os.Exit(1)
 		}
 	default:
 		a.Logger.Error(
 			"unknown database type",
-			slog.String("op", op),
+			logger.Error(err),
 			slog.String("db_type", a.Config.Database.DBType),
 		)
 		os.Exit(1)
 	}
-
 	a.Storage = db
-	a.Logger.Debug("db initialized successfully", slog.String("op", op))
+	log.Debug("db initialized successfully")
 	return nil
 }
 
-func initCache(a *SSOApp) error {
+func initCache(a *SSOApp) {
 	const op = "app.initCache"
+
+	log := a.Logger.With(slog.String("op", op))
 
 	redis, err := redisApp.NewCacheStorage(a.Config.Redis, a.Logger)
 	if err != nil {
-		return fmt.Errorf("%s: %v", op, err)
+		log.Error("cache initialized failed: %v", logger.Error(err))
 	}
-
 	a.CacheStorage = redis
-	a.Logger.Debug("cache initialized successfully", slog.String("op", op))
-	return nil
+	log.Debug("cache initialized successfully")
 }
 
 func initGRPCServer(a *SSOApp, s *AppServices) {
@@ -174,13 +162,13 @@ func initServices(a *SSOApp) *AppServices {
 		a.Logger.Warn(
 			"jwks service not initialized",
 			slog.String("op", op),
-			slog.String("error", err.Error()),
+			logger.Error(err),
 		)
-		panic("jwks service not initialized")
+		os.Exit(1)
 	}
 
 	authConfigs := auth.AuthService{
-		Log:         a.Logger,
+		Logger:      a.Logger,
 		DB:          a.Storage,
 		Cache:       a.CacheStorage,
 		Tokens:      a.Config.Tokens,
@@ -205,60 +193,55 @@ func initJwksService(a *SSOApp) (*jwks.JwksService, error) {
 	return jwksService, nil
 }
 
-func loadConfig(a *SSOApp) error {
+func loadConfig(a *SSOApp) {
 	const op = "app.loadConfig"
+
+	log := a.Logger.With(slog.String("op", op))
 
 	cfg, err := config.Load()
 	if err != nil {
-		if err == flag.ErrHelp {
-			// Вывод справки по флагам
-			fmt.Fprintf(os.Stderr, "Использование %s:\n", os.Args[0])
+		if errors.Is(err, flag.ErrHelp) {
+			// // Вывод справки по флагам
+			// fmt.Fprintf(os.Stderr, "Использование %s:\n", os.Args[0])
 			config.GetFlagSet().Usage()
 			os.Exit(0)
 		}
 		if errors.Is(err, config.ErrModeFlag) {
-			a.Logger.Error(
+			log.Error(
 				"invalid mode flag",
-				slog.String("op", op),
-				slog.String("error", err.Error()),
+				logger.Error(err),
 				slog.String("mode", config.GetModeFlag()),
 			)
 			config.GetFlagSet().Usage()
 			os.Exit(2) // Код 2 для ошибок флагов
 		} else if errors.Is(err, config.ErrDbFlag) {
-			a.Logger.Error(
+			log.Error(
 				"invalid db flag",
-				slog.String("op", op),
-				slog.String("error", err.Error()),
+				logger.Error(err),
 				slog.String("db", config.GetDbFlag()),
 			)
 			config.GetFlagSet().Usage()
 			os.Exit(2)
 		} else if os.IsNotExist(err) {
-			a.Logger.Error(
+			log.Error(
 				"config file not found",
-				slog.String("op", op),
-				slog.String("error", err.Error()),
+				logger.Error(err),
 			)
 			os.Exit(3) // Код 3 для ошибок файлов
 		} else {
-			a.Logger.Error(
+			log.Error(
 				"configuration loading error",
-				slog.String("op", op),
-				slog.String("error", err.Error()),
+				logger.Error(err),
 			)
 			os.Exit(1) // Общий код для прочих ошибок
 		}
 		// Логирование остальных ошибок
-		a.Logger.Error(
+		log.Error(
 			"configuration loading error",
-			slog.String("op", op),
-			slog.String("error", err.Error()),
+			logger.Error(err),
 		)
 		os.Exit(1)
 	}
-
 	a.Config = cfg
-	a.Logger.Debug("configuration successfully loaded", slog.String("op", op))
-	return nil
+	log.Debug("configuration successfully loaded")
 }

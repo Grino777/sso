@@ -169,7 +169,7 @@ func Load() (*Config, error) {
 func parseFlag(cfg *Config) error {
 	const op = configOp + "parseFlag"
 
-	flagSet := flag.NewFlagSet("myprogram", flag.ContinueOnError)
+	flagSet = flag.NewFlagSet("sso", flag.ContinueOnError)
 	flagSet.StringVar(&modeFlag, "mode", "", "application mode (local, dev, prod)")
 	flagSet.StringVar(&dbFlag, "db", "", "database type (postgres, sqlite)")
 

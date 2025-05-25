@@ -94,7 +94,8 @@ func (a *GRPCApp) Run() error {
 		panic(fmt.Errorf("%s: %w", op, err))
 	}
 
-	a.log.Info("grpc server is running",
+	a.log.Info(
+		"grpc server is running",
 		slog.String("addr", (l.Addr().String())),
 		slog.String("mode", a.mode),
 	)
@@ -105,7 +106,7 @@ func (a *GRPCApp) Run() error {
 	return nil
 }
 
-// GracefulStop gRPC Server
+// GracefulStop for gRPC Server
 func (a *GRPCApp) Stop() {
 	const op = "grpcapp.Stop"
 
