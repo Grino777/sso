@@ -7,7 +7,10 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"sync"
+	"time"
 
+	"github.com/Grino777/sso/internal/app/apiserver"
 	grpcapp "github.com/Grino777/sso/internal/app/grpc"
 	"github.com/Grino777/sso/internal/config"
 	"github.com/Grino777/sso/internal/domain/models/interfaces"
@@ -25,13 +28,16 @@ const (
 	DBTypeSQLite   = "sqlite"
 )
 
+const opApp = "app."
+
 type SSOApp struct {
-	Ctx          context.Context
 	Config       *config.Config
 	Logger       *slog.Logger
 	GRPCServer   *grpcapp.GRPCApp
 	Storage      interfaces.Storage
 	CacheStorage interfaces.CacheStorage
+	ApiServer    *apiserver.APIServer
+	cancel       context.CancelFunc
 }
 
 type AppServices struct {
@@ -55,19 +61,66 @@ func (s *AppServices) Jwks() *jwks.JwksService {
 	return s.jwksService
 }
 
-func New(
+func NewApp(
+	ctx context.Context,
 	logger *slog.Logger,
+	cancel context.CancelFunc,
 ) (*SSOApp, error) {
-	app := &SSOApp{Ctx: context.Background(), Logger: logger}
+	const op = opApp + "New"
+
+	app := &SSOApp{Logger: logger, cancel: cancel}
 
 	loadConfig(app)
-	initDB(app)
-	initCache(app)
+
+	if err := initDB(ctx, app); err != nil {
+		return app, fmt.Errorf("%s: %v", op, err)
+	}
+	if err := initCache(ctx, app); err != nil {
+		return app, fmt.Errorf("%s: %v", op, err)
+	}
 
 	services := initServices(app)
 	initGRPCServer(app, services)
+	initApiServer(app)
 
 	return app, nil
+}
+
+func (a *SSOApp) Run(ctx context.Context) {
+	var wg sync.WaitGroup
+	errChan := make(chan error, 2)
+
+	wg.Add(1)
+	go func() {
+		if err := a.GRPCServer.Run(ctx); err != nil {
+			errChan <- err
+		}
+	}()
+
+	wg.Add(1)
+	go func() {
+		if err := a.ApiServer.Run(ctx); err != nil {
+			errChan <- err
+		}
+	}()
+
+	wg.Add(1)
+	go func() {
+		redisApp.MonitorRedisConnection(ctx, a.CacheStorage, a.Logger, errChan)
+		wg.Done()
+	}()
+
+	go func() {
+		select {
+		case <-ctx.Done():
+			a.Stop()
+		case err := <-errChan:
+			a.Logger.Error("server failed", logger.Error(err))
+			a.Stop()
+		}
+	}()
+
+	wg.Wait()
 }
 
 func (a *SSOApp) Stop() {
@@ -75,20 +128,26 @@ func (a *SSOApp) Stop() {
 
 	log := a.Logger.With(slog.String("op", op))
 
-	if err := a.Storage.Close(a.Ctx); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := a.Storage.Close(ctx); err != nil {
 		log.Error("failed to close db session", logger.Error(err))
-	} else {
-		log.Debug("db session closed")
+	}
+	if err := a.CacheStorage.Close(ctx); err != nil {
+		log.Error("failed to close redis session", logger.Error(err))
 	}
 
-	if err := a.CacheStorage.Close(a.Ctx); err != nil {
-		log.Error("failed to close redis session", logger.Error(err))
-	} else {
-		log.Debug("redis session closed")
-	}
+	a.cancel()
+	log.Debug("application stopped")
 }
 
-func initDB(a *SSOApp) error {
+func initApiServer(a *SSOApp) {
+	server := apiserver.NewApiServer(a.Logger, a.Config.ApiServer)
+	a.ApiServer = server
+}
+
+func initDB(ctx context.Context, a *SSOApp) error {
 	const op = "grpc.app.initDb"
 
 	log := a.Logger.With(slog.String("op", op))
@@ -98,13 +157,13 @@ func initDB(a *SSOApp) error {
 
 	switch a.Config.Database.DBType {
 	case DBTypePostgres:
-		db, err = postgres.NewPostgresStorage(a.Ctx, a.Config.Database)
+		db, err = postgres.NewPostgresStorage(ctx, a.Config.Database, a.Logger)
 		if err != nil {
 			log.Error(
 				"failed to initialize Postgres storage",
 				logger.Error(err),
 			)
-			os.Exit(1)
+			a.Stop()
 		}
 	case DBTypeSQLite:
 		if err := storageU.CheckStorageFolder(); err != nil {
@@ -112,15 +171,15 @@ func initDB(a *SSOApp) error {
 				"failed to check storage folder",
 				logger.Error(err),
 			)
-			os.Exit(1)
+			a.Stop()
 		}
-		db, err = dbApp.New("sqlite3", a.Config.Database.LocalStoragePath, a.Config.SuperUser)
+		db, err = dbApp.New("sqlite3", a.Config.Database.LocalStoragePath, a.Config.SuperUser, a.Logger)
 		if err != nil {
 			a.Logger.Error(
 				"failed to initialize SQLite storage",
 				logger.Error(err),
 			)
-			os.Exit(1)
+			a.Stop()
 		}
 	default:
 		a.Logger.Error(
@@ -128,24 +187,26 @@ func initDB(a *SSOApp) error {
 			logger.Error(err),
 			slog.String("db_type", a.Config.Database.DBType),
 		)
-		os.Exit(1)
+		a.Stop()
 	}
 	a.Storage = db
 	log.Debug("db initialized successfully")
 	return nil
 }
 
-func initCache(a *SSOApp) {
+func initCache(ctx context.Context, a *SSOApp) error {
 	const op = "app.initCache"
 
 	log := a.Logger.With(slog.String("op", op))
 
-	redis, err := redisApp.NewCacheStorage(a.Config.Redis, a.Logger)
+	// FIXME
+	redis, err := redisApp.NewRedisStorage(ctx, a.Config.Redis, a.Logger)
 	if err != nil {
 		log.Error("cache initialized failed: %v", logger.Error(err))
 	}
 	a.CacheStorage = redis
 	log.Debug("cache initialized successfully")
+	return nil
 }
 
 func initGRPCServer(a *SSOApp, s *AppServices) {

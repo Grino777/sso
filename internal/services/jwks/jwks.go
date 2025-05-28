@@ -35,7 +35,6 @@ func New(
 	}, nil
 }
 
-// FIXME
 func (j *JwksService) GetJwks(context.Context) ([]*sso.Jwk, error) {
 	const op = "jwks.jwks.GetJwks"
 

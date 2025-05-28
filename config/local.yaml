@@ -3,17 +3,20 @@ db:
   local_storage_path: "./storage/sso.sqlite3"
   db_name: "sso"
 grpc:
-  url: "127.0.0.1"
-  port: 8088
-  timeout: 5s
-tokenTTL: 1h
-refreshTokenTTL: 168h
+  grpc_addr: "127.0.0.1"
+  grpc_port: 8088
+  grpc_timeout: "5s"
+tokenTTL: "1h"
+refreshTokenTTL: "168h"
 redis:
-    addr: "127.0.0.1:6379"
-    password: ""
-    user: ""
-    db: 0
-    max_retries: 5
-    dial_timeout: 10s
-    timeout: 5s
-    tokenTTL: 1h
+  redis_addr: "127.0.0.1:6379"
+  password: ""
+  user: ""
+  db: 0
+  max_retries: 5
+  dial_timeout: "10s"
+  timeout: "5s"
+  tokenTTL: "1h"
+api_server:
+  api_addr: "127.0.0.1"
+  api_port: "8089"

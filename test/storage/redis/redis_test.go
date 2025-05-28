@@ -38,7 +38,7 @@ func setupRedisStorage(t *testing.T) (*appR.RedisStorage, *miniredis.Miniredis) 
 		Cfg:        cfg,
 		MaxRetries: 3,
 		RetryDelay: time.Second,
-		Log:        log,
+		Logger:     log,
 		Client: redis.NewClient(&redis.Options{
 			Addr:     mr.Addr(),
 			Password: "",

@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/Grino777/sso/internal/config"
 	"github.com/Grino777/sso/internal/domain/models"
@@ -13,9 +14,14 @@ const pgOp = "storage.postgres.postgres."
 
 type PostgresStorage struct {
 	Client *pgx.Conn
+	Logger *slog.Logger
 }
 
-func NewPostgresStorage(ctx context.Context, cfg config.DatabaseConfig) (*PostgresStorage, error) {
+func NewPostgresStorage(
+	ctx context.Context,
+	cfg config.DatabaseConfig,
+	log *slog.Logger,
+) (*PostgresStorage, error) {
 
 	user := cfg.DBUser
 	pass := cfg.DBPass
@@ -28,7 +34,10 @@ func NewPostgresStorage(ctx context.Context, cfg config.DatabaseConfig) (*Postgr
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to Postgres: %w", err)
 	}
-	return &PostgresStorage{Client: client}, nil
+	return &PostgresStorage{
+		Client: client,
+		Logger: log,
+	}, nil
 }
 
 func (ps *PostgresStorage) Close(ctx context.Context) error {

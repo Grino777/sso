@@ -101,4 +101,4 @@ func (s *AuthService) validatePassword(passHash []byte, password string) error {
 	return nil
 }
 
-func (s *AuthService) loggingUserLogin()
+func (s *AuthService) loggingUserLogin() {}

@@ -3,87 +3,101 @@ package redis
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
+	"github.com/Grino777/sso/internal/lib/logger"
 	"github.com/redis/go-redis/v9"
 )
 
-func (rs *RedisStorage) connect() error {
-	rs.Mu.Lock()
-	defer rs.Mu.Unlock()
+func (rs *RedisStorage) Connect() error {
+	const op = opRedis + "Connect"
 
-	if rs.Client != nil {
-		rs.Client.Close()
+	log := rs.Logger.With(slog.String("op", op))
+
+	if err := rs.connectWithRetry(rs.Cfg.MaxRetries); err != nil {
+		log.Error("failed to connect to Redis after retries", logger.Error(err))
+		return fmt.Errorf("%s: %w", op, err)
 	}
 
-	options := &redis.Options{
-		Addr:         rs.Cfg.Addr,
-		Password:     rs.Cfg.Password,
-		Username:     rs.Cfg.User,
-		DB:           rs.Cfg.DB,
-		MaxRetries:   rs.Cfg.MaxRetries,
-		DialTimeout:  rs.Cfg.DialTimeout,
-		ReadTimeout:  rs.Cfg.Timeout,
-		WriteTimeout: rs.Cfg.Timeout,
-	}
-
-	client := redis.NewClient(options)
-
-	ctx, cancel := context.WithTimeout(context.Background(), rs.RetryDelay)
-	defer cancel()
-	if err := client.Ping(ctx).Err(); err != nil {
-		client.Close()
-		return err
-	}
-
-	rs.Client = client
-
+	log.Debug("redis connection established")
 	return nil
-
 }
 
 func (rs *RedisStorage) connectWithRetry(maxAttempts int) error {
+	const op = opRedis + "connectWithRetry"
+
+	log := rs.Logger.With(slog.String("op", op))
+
 	var lastErr error
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		if err := rs.connect(); err == nil {
-			rs.Log.Debug("redis connection established")
-			return nil
-		} else {
+		rs.Mu.Lock()
+		if rs.Client != nil {
+			if err := rs.Client.Close(); err != nil {
+				log.Warn("failed to close old Redis client", logger.Error(err))
+			}
+			rs.Client = nil
+		}
+
+		options := &redis.Options{
+			Addr:         rs.Cfg.Addr,
+			Password:     rs.Cfg.Password,
+			Username:     rs.Cfg.User,
+			DB:           rs.Cfg.DB,
+			MaxRetries:   rs.Cfg.MaxRetries,
+			DialTimeout:  rs.Cfg.DialTimeout,
+			ReadTimeout:  rs.Cfg.Timeout,
+			WriteTimeout: rs.Cfg.Timeout,
+		}
+
+		client := redis.NewClient(options)
+		rs.Mu.Unlock()
+
+		// Проверка соединения
+		ctx, cancel := context.WithTimeout(context.Background(), rs.RetryDelay)
+		if err := client.Ping(ctx).Err(); err != nil {
+			cancel() // Закрываем контекст сразу после ошибки
+			rs.Mu.Lock()
+			if closeErr := client.Close(); closeErr != nil {
+				log.Warn("failed to close Redis client after failed ping", logger.Error(closeErr))
+			}
+			rs.Mu.Unlock()
 			lastErr = err
-			rs.Log.Warn("failed to connect to redis",
-				"atempt", attempt,
-				"error", lastErr,
-				"retryAfter", rs.RetryDelay,
+			log.Warn("failed to connect to Redis",
+				slog.Int("attempt", attempt),
+				slog.Any("error", lastErr),
+				slog.Duration("retryAfter", rs.RetryDelay),
 			)
 			if attempt < maxAttempts {
 				time.Sleep(rs.RetryDelay)
 			}
+			continue
 		}
+		cancel() // Закрываем контекст после успешного пинга
+
+		rs.Mu.Lock()
+		rs.Client = client
+		rs.Mu.Unlock()
+
+		return nil
 	}
+
 	return fmt.Errorf("failed to connect after %d attempts: %w", maxAttempts, lastErr)
 }
 
-func (rs *RedisStorage) listenConnection() {
-	ticker := time.NewTicker(10 * time.Second)
-	defer ticker.Stop()
+func (rs *RedisStorage) Close(ctx context.Context) error {
+	rs.Mu.Lock()
+	defer rs.Mu.Unlock()
 
-	for range ticker.C {
-		rs.Mu.Lock()
-		client := rs.Client
-		rs.Mu.Unlock()
-
-		ctx, cancel := context.WithTimeout(context.Background(), rs.RetryDelay)
-		if client != nil {
-			if err := client.Ping(ctx).Err(); err != nil {
-				rs.connectWithRetry(rs.MaxRetries)
+	if rs.Client != nil {
+		if err := rs.Client.Close(); err != nil {
+			if err.Error() != "redis: client is closed" {
+				return fmt.Errorf("failed to close redis client: %w", err)
 			}
-		} else {
-			panic("redis client is nil")
-
 		}
-
-		cancel()
+		rs.Client = nil
 	}
+	return nil
 }
 
 func withClient[T any](
@@ -102,7 +116,7 @@ func withClient[T any](
 	}
 
 	if err := client.Ping(ctx).Err(); err != nil {
-		rs.Log.Warn("redis connection lost, attempting reconnect", "error", err)
+		rs.Logger.Warn("redis connection lost, attempting reconnect", "error", err)
 		if err := rs.connectWithRetry(3); err != nil {
 			return zero, fmt.Errorf("failed to reconnect: %w", err)
 		}

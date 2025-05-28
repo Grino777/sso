@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/Grino777/sso/internal/config"
@@ -21,13 +22,20 @@ var (
 	ErrRefreshTokenExist = errors.New("refresh token is exist in refresh_tokens table")
 )
 
+const sqliteOP = "storage.sqlite."
+
 type SQLiteStorage struct {
 	driverName string
 	db         *sql.DB
+	logger     *slog.Logger
 }
 
 // Creates a new DB session and performs migrations
-func New(driverName string, dbPath string, dbUser config.SuperUser) (*SQLiteStorage, error) {
+func New(
+	driverName, dbPath string,
+	dbUser config.SuperUser,
+	log *slog.Logger,
+) (*SQLiteStorage, error) {
 	const op = "sqlite.New"
 
 	storage := &SQLiteStorage{}
@@ -177,6 +185,12 @@ func (s *SQLiteStorage) SaveRefreshToken(
 
 // Close DB session
 func (s *SQLiteStorage) Close(ctx context.Context) error {
-	s.db.Close()
+	const op = sqliteOP + "Close"
+
+	if err := s.db.Close(); err != nil {
+		s.logger.Error("failed to closing sqlite connection")
+		s.db = nil
+		return fmt.Errorf("%s: %v", op, err)
+	}
 	return nil
 }

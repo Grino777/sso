@@ -78,20 +78,13 @@ func InterceptorLogger(l *slog.Logger) logging.Logger {
 	})
 }
 
-// Run gRPC server and panics if any error occurs.
-func (a *GRPCApp) MustRun() {
-	if err := a.Run(); err != nil {
-		panic(err)
-	}
-}
-
 // Run gRPC Server
-func (a *GRPCApp) Run() error {
+func (a *GRPCApp) Run(ctx context.Context) error {
 	const op = "grpcapp.Run"
 
 	l, err := net.Listen("tcp", fmt.Sprintf(":%d", a.port))
 	if err != nil {
-		panic(fmt.Errorf("%s: %w", op, err))
+		return fmt.Errorf("%s: %w", op, err)
 	}
 
 	a.log.Info(
@@ -103,6 +96,13 @@ func (a *GRPCApp) Run() error {
 	if err := a.gRPCServer.Serve(l); err != nil {
 		return fmt.Errorf("%s: %w", op, err)
 	}
+
+	<-ctx.Done()
+	a.log.Info("shutting down gRPC server")
+
+	// Грациозно завершаем работу
+	a.Stop()
+	a.log.Info("gRPC server stopped")
 	return nil
 }
 

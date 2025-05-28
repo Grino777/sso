@@ -91,6 +91,8 @@ func (s *AuthService) Login(
 		return models.Tokens{}, err
 	}
 
+	// TODO loging user login
+
 	log.Info("logged is successfully")
 	return user.Tokens, nil
 }

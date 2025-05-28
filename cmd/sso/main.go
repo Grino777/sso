@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -13,22 +14,21 @@ import (
 )
 
 func main() {
-
 	log := logger.New(os.Stdout, slog.LevelDebug)
+	ctx, cancel := context.WithCancel(context.Background())
 
-	app, err := app.New(log)
+	app, err := app.NewApp(ctx, log, cancel)
 	if err != nil {
-		panic(err.Error())
+		log.Error("failed to creating app obj", logger.Error(err))
+		os.Exit(1)
 	}
 
-	go func() {
-		app.GRPCServer.MustRun()
-	}()
+	app.Run(ctx)
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGTERM, syscall.SIGINT)
 	<-stop
 
-	app.GRPCServer.Stop()
+	app.Stop()
 	log.Info("Gracefully stopped")
 }

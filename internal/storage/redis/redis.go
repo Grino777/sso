@@ -19,7 +19,7 @@ var (
 	ErrCacheNotFound = errors.New("data not cached")
 )
 
-const opRedis = "storage.redis.redis."
+const opRedis = "storage.redis."
 
 type RedisStorage struct {
 	Mu         sync.RWMutex
@@ -27,25 +27,16 @@ type RedisStorage struct {
 	Client     *redis.Client
 	MaxRetries int
 	RetryDelay time.Duration // Задержка перед переподключением
-	Log        *slog.Logger
+	Logger     *slog.Logger
 }
 
-func NewCacheStorage(cfg config.RedisConfig, log *slog.Logger) (*RedisStorage, error) {
-	const op = opRedis + "NewCacheStorage"
-
+func NewRedisStorage(ctx context.Context, cfg config.RedisConfig, log *slog.Logger) (*RedisStorage, error) {
 	store := &RedisStorage{
 		Cfg:        cfg,
 		MaxRetries: 5,
 		RetryDelay: 4 * time.Second,
-		Log:        log,
+		Logger:     log,
 	}
-
-	if err := store.connectWithRetry(store.MaxRetries); err != nil {
-		return nil, fmt.Errorf("%s: %v", op, err)
-	}
-
-	go store.listenConnection()
-
 	return store, nil
 }
 
@@ -69,7 +60,7 @@ func (rs *RedisStorage) SaveUser(
 		if err != nil {
 			return models.User{}, fmt.Errorf("%s: %v", op, err)
 		}
-		rs.Log.Debug("user successfuly cached", "username", user.Username)
+		rs.Logger.Debug("user successfuly cached", "username", user.Username)
 		return models.User{}, nil
 	})
 }
@@ -156,7 +147,7 @@ func (rs *RedisStorage) SaveApp(
 			return models.App{}, fmt.Errorf("%s: %v", op, err)
 		}
 
-		rs.Log.Info("app added to cache", "appID", app.ID)
+		rs.Logger.Info("app added to cache", "appID", app.ID)
 		return models.App{}, nil
 	})
 	if err != nil {
@@ -166,14 +157,3 @@ func (rs *RedisStorage) SaveApp(
 }
 
 // -----------------------------------End Block------------------------------------
-
-// Close Redis session
-func (rs *RedisStorage) Close(ctx context.Context) error {
-	rs.Mu.Lock()
-	defer rs.Mu.Unlock()
-
-	if rs.Client != nil {
-		rs.Client.Close()
-	}
-	return nil
-}

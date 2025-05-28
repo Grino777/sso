@@ -87,6 +87,7 @@ type Config struct {
 	Tokens    TokenConfig
 	FS        FileSystemConfig
 	SuperUser SuperUser
+	ApiServer ApiServerConfig `yaml:"api_server" env-required:"true"`
 }
 
 type DatabaseConfig struct {
@@ -118,14 +119,14 @@ type SuperUser struct {
 
 // GRPCConfig содержит настройки gRPC-сервера.
 type GRPCConfig struct {
-	URL     string        `yaml:"url" env-required:"true"`
-	Port    uint16        `yaml:"port" env-required:"true"`
-	Timeout time.Duration `yaml:"timeout" env-default:"5s"`
+	Addr    string        `yaml:"grpc_addr" env-required:"true"`
+	Port    uint16        `yaml:"grpc_port" env-required:"true"`
+	Timeout time.Duration `yaml:"grpc_timeout" env-default:"5s"`
 }
 
 // RedisConfig содержит настройки Redis.
 type RedisConfig struct {
-	Addr        string        `yaml:"addr" env-default:"127.0.0.1:6379"`
+	Addr        string        `yaml:"redis_addr" env-default:"127.0.0.1:6379"`
 	Password    string        `yaml:"password"`
 	User        string        `yaml:"user"`
 	DB          int           `yaml:"db" env-default:"0"`
@@ -133,6 +134,12 @@ type RedisConfig struct {
 	DialTimeout time.Duration `yaml:"dial_timeout" env-default:"10s"`
 	Timeout     time.Duration `yaml:"timeout" env-default:"5s"`
 	TokenTTL    time.Duration `yaml:"tokenTTL" env-default:"1h"`
+}
+
+type ApiServerConfig struct {
+	Addr     string `yaml:"api_addr" env-required:"true"`
+	Port     string `yaml:"api_port" env-required:"true"`
+	CertsDir string
 }
 
 // GetFlagSet возвращает flagSet для использования в других пакетах.
@@ -237,7 +244,7 @@ func loadConfig() (*Config, error) {
 	}
 
 	if err := cleanenv.ReadConfig(cfg.FS.ConfigPath, cfg); err != nil {
-		return nil, fmt.Errorf("%s: failed to read config file: %w", op, err)
+		return nil, fmt.Errorf("%s: failed to read config file %q: %w", op, cfg.FS.ConfigPath, err)
 	}
 
 	if err := parseEnv(cfg); err != nil {
@@ -248,7 +255,8 @@ func loadConfig() (*Config, error) {
 		return nil, fmt.Errorf("%s: %w", op, err)
 	}
 
-	setKeysDir(cfg)
+	cfg.FS.KeysDir = filepath.Join(cfg.FS.BaseDir, "keys")
+	cfg.ApiServer.CertsDir = filepath.Join(cfg.FS.BaseDir, "certs")
 
 	return cfg, nil
 }
@@ -322,8 +330,4 @@ func setBaseDir(cfg *Config, configPath string) error {
 
 	cfg.FS.BaseDir = filepath.Dir(filepath.Dir(absPath))
 	return nil
-}
-
-func setKeysDir(cfg *Config) {
-	cfg.FS.KeysDir = filepath.Join(cfg.FS.BaseDir, "keys")
 }
