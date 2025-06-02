@@ -10,7 +10,7 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-func (rs *RedisStorage) Connect() error {
+func (rs *RedisStorage) Connect(ctx context.Context) error {
 	const op = opRedis + "Connect"
 
 	log := rs.Logger.With(slog.String("op", op))
@@ -97,6 +97,7 @@ func (rs *RedisStorage) Close(ctx context.Context) error {
 		}
 		rs.Client = nil
 	}
+	rs.Logger.Debug("redis connection is closed")
 	return nil
 }
 
@@ -117,7 +118,7 @@ func withClient[T any](
 
 	if err := client.Ping(ctx).Err(); err != nil {
 		rs.Logger.Warn("redis connection lost, attempting reconnect", "error", err)
-		if err := rs.connectWithRetry(3); err != nil {
+		if err := rs.connectWithRetry(rs.Cfg.MaxRetries); err != nil {
 			return zero, fmt.Errorf("failed to reconnect: %w", err)
 		}
 		rs.Mu.RLock()

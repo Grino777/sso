@@ -9,7 +9,7 @@ import (
 
 	"github.com/Grino777/sso/internal/config"
 	"github.com/Grino777/sso/internal/domain/models"
-	"github.com/Grino777/sso/internal/domain/models/interfaces"
+	interfaces "github.com/Grino777/sso/internal/interfaces/storage"
 	"github.com/Grino777/sso/internal/lib/logger"
 	jwksM "github.com/Grino777/sso/internal/services/jwks/models"
 	"github.com/Grino777/sso/internal/storage"
@@ -33,9 +33,11 @@ type AuthService struct {
 	JwksService JwksProvider
 }
 
-func New(
+func NewAuthService(
 	authConfigs AuthService,
 ) *AuthService {
+	authConfigs.Logger.Debug("auth service successfully initialized")
+
 	return &AuthService{
 		Logger:      authConfigs.Logger,
 		DB:          authConfigs.DB,

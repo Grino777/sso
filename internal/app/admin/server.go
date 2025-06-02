@@ -1,4 +1,4 @@
-package apiserver
+package admin
 
 import (
 	"context"
@@ -29,6 +29,7 @@ func NewApiServer(log *slog.Logger, cfg config.ApiServerConfig) *APIServer {
 				slog.String("path", param.Path),
 				slog.Int("status", param.StatusCode),
 				slog.String("latency", param.Latency.String()),
+				slog.String("client_ip", param.ClientIP),
 			)
 			return ""
 		},
@@ -71,6 +72,10 @@ func (as *APIServer) Run(ctx context.Context) error {
 
 	log := as.Logger.With("op", op)
 
+	if err := certs.CheckCertsFolder(as.Config.CertsDir); err != nil {
+		return err
+	}
+
 	expired, err := certs.CheckCertificate(as.Config.CertsDir)
 	if err != nil {
 		log.Error("failed to checking certificate: %v", logger.Error(err))
@@ -85,6 +90,8 @@ func (as *APIServer) Run(ctx context.Context) error {
 
 	certPath := filepath.Join(as.Config.CertsDir, "cert.pem")
 	keyPath := filepath.Join(as.Config.CertsDir, "key.pem")
+
+	as.RegisterRoutes()
 
 	if err := as.Server.ListenAndServeTLS(certPath, keyPath); err != nil && err != http.ErrServerClosed {
 		log.Error("failed to starting api server", logger.Error(err))

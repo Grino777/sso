@@ -13,37 +13,44 @@ import (
 const pgOp = "storage.postgres.postgres."
 
 type PostgresStorage struct {
-	Client *pgx.Conn
-	Logger *slog.Logger
+	client *pgx.Conn
+	logger *slog.Logger
+	cfg    config.DatabaseConfig
 }
 
 func NewPostgresStorage(
-	ctx context.Context,
 	cfg config.DatabaseConfig,
 	log *slog.Logger,
-) (*PostgresStorage, error) {
+) *PostgresStorage {
+	return &PostgresStorage{
+		logger: log,
+		cfg:    cfg,
+	}
+}
 
-	user := cfg.DBUser
-	pass := cfg.DBPass
-	host := cfg.DBHost
-	port := cfg.DBPort
-	db := cfg.DBName
+func (ps *PostgresStorage) Connect(ctx context.Context) error {
+
+	user := ps.cfg.DBUser
+	pass := ps.cfg.DBPass
+	host := ps.cfg.DBHost
+	port := ps.cfg.DBPort
+	db := ps.cfg.DBName
 
 	connStr := fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=disable", user, pass, host, port, db)
 	client, err := pgx.Connect(ctx, connStr)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to Postgres: %w", err)
+		return fmt.Errorf("failed to connect to Postgres: %w", err)
 	}
-	return &PostgresStorage{
-		Client: client,
-		Logger: log,
-	}, nil
+
+	ps.client = client
+
+	return nil
 }
 
 func (ps *PostgresStorage) Close(ctx context.Context) error {
 	const op = pgOp + "Close"
 
-	if err := ps.Client.Close(ctx); err != nil {
+	if err := ps.client.Close(ctx); err != nil {
 		return fmt.Errorf("%s: %v", op, err)
 	}
 	return nil

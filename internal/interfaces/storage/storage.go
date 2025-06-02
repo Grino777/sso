@@ -1,4 +1,4 @@
-package interfaces
+package storage
 
 import (
 	"context"
@@ -10,7 +10,7 @@ type Storage interface {
 	StorageUserProvider
 	StorageAppProvider
 	StorageTokenProvider
-	Closer
+	Connector
 }
 
 type StorageUserProvider interface {
@@ -28,6 +28,7 @@ type StorageTokenProvider interface {
 	SaveRefreshToken(ctx context.Context, userID uint64, appID uint32, token models.Token) error
 }
 
-type Closer interface {
+type Connector interface {
+	Connect(ctx context.Context) error
 	Close(ctx context.Context) error
 }

@@ -30,10 +30,10 @@ type RedisStorage struct {
 	Logger     *slog.Logger
 }
 
-func NewRedisStorage(ctx context.Context, cfg config.RedisConfig, log *slog.Logger) (*RedisStorage, error) {
+func NewRedisStorage(cfg config.RedisConfig, log *slog.Logger) (*RedisStorage, error) {
 	store := &RedisStorage{
 		Cfg:        cfg,
-		MaxRetries: 5,
+		MaxRetries: cfg.MaxRetries,
 		RetryDelay: 4 * time.Second,
 		Logger:     log,
 	}

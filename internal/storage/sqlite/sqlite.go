@@ -12,8 +12,6 @@ import (
 	"github.com/Grino777/sso/internal/config"
 	"github.com/Grino777/sso/internal/domain/models"
 	"github.com/Grino777/sso/internal/storage"
-	sUtils "github.com/Grino777/sso/internal/utils/storage/sqlite"
-	"github.com/Grino777/sso/migrations"
 
 	"github.com/mattn/go-sqlite3"
 )
@@ -22,41 +20,28 @@ var (
 	ErrRefreshTokenExist = errors.New("refresh token is exist in refresh_tokens table")
 )
 
-const sqliteOP = "storage.sqlite."
+const sqliteOp = "storage.sqlite."
 
 type SQLiteStorage struct {
-	driverName string
 	db         *sql.DB
+	driverName string
+	localPath  string
+	superuser  config.SuperUser
 	logger     *slog.Logger
 }
 
 // Creates a new DB session and performs migrations
 func New(
-	driverName, dbPath string,
-	dbUser config.SuperUser,
+	driverName, localPath string,
+	superuser config.SuperUser,
 	log *slog.Logger,
-) (*SQLiteStorage, error) {
-	const op = "sqlite.New"
-
-	storage := &SQLiteStorage{}
-
-	db, err := sql.Open(driverName, dbPath)
-	if err != nil {
-		return nil, fmt.Errorf("%s: failed to connect to database: %v", op, err)
+) *SQLiteStorage {
+	return &SQLiteStorage{
+		driverName: driverName,
+		localPath:  localPath,
+		superuser:  superuser,
+		logger:     log,
 	}
-
-	storage.driverName = driverName
-	storage.db = db
-
-	if err := migrations.Migrate(storage.db, driverName); err != nil {
-		return nil, err
-	}
-
-	if err := sUtils.CreateSuperUser(storage.db, dbUser.Username, dbUser.Password); err != nil {
-		return nil, fmt.Errorf("%s: %v", op, err)
-	}
-
-	return storage, nil
 }
 
 func (s *SQLiteStorage) SaveUser(
@@ -127,7 +112,6 @@ func (s *SQLiteStorage) GetApp(
 		}
 		return app, fmt.Errorf("%s: %v", op, err)
 	}
-
 	return app, nil
 }
 
@@ -178,19 +162,6 @@ func (s *SQLiteStorage) SaveRefreshToken(
 			}
 		}
 		return fmt.Errorf("failed to save or update refresh token: %w", err)
-	}
-
-	return nil
-}
-
-// Close DB session
-func (s *SQLiteStorage) Close(ctx context.Context) error {
-	const op = sqliteOP + "Close"
-
-	if err := s.db.Close(); err != nil {
-		s.logger.Error("failed to closing sqlite connection")
-		s.db = nil
-		return fmt.Errorf("%s: %v", op, err)
 	}
 	return nil
 }

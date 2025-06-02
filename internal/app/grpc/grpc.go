@@ -7,11 +7,12 @@ import (
 	"net"
 
 	"github.com/Grino777/sso/internal/config"
-	"github.com/Grino777/sso/internal/domain/models/interfaces"
 	grpcauth "github.com/Grino777/sso/internal/grpc/auth"
 	grpcjwks "github.com/Grino777/sso/internal/grpc/jwks"
 	"github.com/Grino777/sso/internal/services/auth"
 	"github.com/Grino777/sso/internal/services/jwks"
+
+	_ "net/http/pprof"
 
 	"github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/logging"
 	"github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/recovery"
@@ -36,8 +37,8 @@ type GRPCApp struct {
 func New(
 	log *slog.Logger,
 	services Services,
-	db interfaces.Storage,
-	cache interfaces.CacheStorage,
+	// db interfaces.Storage,
+	// cache interfaces.CacheStorage,
 	cfg *config.Config,
 ) *GRPCApp {
 
@@ -70,14 +71,6 @@ func New(
 	}
 }
 
-// InterceptorLogger adapts slog logger to interceptor logger.
-// !!! This code is simple enough to be copied and not imported.
-func InterceptorLogger(l *slog.Logger) logging.Logger {
-	return logging.LoggerFunc(func(ctx context.Context, lvl logging.Level, msg string, fields ...any) {
-		l.Log(ctx, slog.Level(lvl), msg, fields...)
-	})
-}
-
 // Run gRPC Server
 func (a *GRPCApp) Run(ctx context.Context) error {
 	const op = "grpcapp.Run"
@@ -93,14 +86,13 @@ func (a *GRPCApp) Run(ctx context.Context) error {
 		slog.String("mode", a.mode),
 	)
 
-	if err := a.gRPCServer.Serve(l); err != nil {
+	if err := a.gRPCServer.Serve(l); err != nil && err != grpc.ErrServerStopped {
 		return fmt.Errorf("%s: %w", op, err)
 	}
 
 	<-ctx.Done()
 	a.log.Info("shutting down gRPC server")
 
-	// Грациозно завершаем работу
 	a.Stop()
 	a.log.Info("gRPC server stopped")
 	return nil
@@ -110,6 +102,17 @@ func (a *GRPCApp) Run(ctx context.Context) error {
 func (a *GRPCApp) Stop() {
 	const op = "grpcapp.Stop"
 
-	a.log.With(slog.String("op", op)).Info("stoping gRPC server", slog.Int("port", int(a.port)))
+	log := a.log.With(slog.String("op", op))
+
+	log.Debug("stoping gRPC server", slog.Int("port", int(a.port)))
 	a.gRPCServer.GracefulStop()
+	log.Info("gRPC server stopped")
+}
+
+// InterceptorLogger adapts slog logger to interceptor logger.
+// !!! This code is simple enough to be copied and not imported.
+func InterceptorLogger(l *slog.Logger) logging.Logger {
+	return logging.LoggerFunc(func(ctx context.Context, lvl logging.Level, msg string, fields ...any) {
+		l.Log(ctx, slog.Level(lvl), msg, fields...)
+	})
 }

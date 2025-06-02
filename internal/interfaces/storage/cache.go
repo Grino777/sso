@@ -1,4 +1,4 @@
-package interfaces
+package storage
 
 import (
 	"context"
@@ -9,7 +9,7 @@ import (
 type CacheStorage interface {
 	CacheUserProvider
 	CacheAppProvider
-	Closer
+	Connector
 }
 
 type CacheUserProvider interface {
@@ -22,3 +22,7 @@ type CacheAppProvider interface {
 	GetApp(ctx context.Context, appID uint32) (models.App, error)
 	SaveApp(ctx context.Context, app models.App) error
 }
+
+// type CacheUtilsProvider interface {
+// 	MonitorRedisConnection(ctx context.Context, log *slog.Logger, errChan chan error)
+// }
