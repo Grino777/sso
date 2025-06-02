@@ -1,11 +1,12 @@
 // Пакет с методами для взаимодействия клиента и gRPC сервера
-package server
+package auth
 
 import (
 	"context"
 	"errors"
-	"strings"
+	"strconv"
 
+	"github.com/Grino777/sso/internal/domain/models"
 	"github.com/Grino777/sso/internal/services/auth"
 	"github.com/Grino777/sso/internal/storage"
 
@@ -17,10 +18,11 @@ import (
 
 // Методы для работы с бизнес-логикой
 type AuthService interface {
-	Login(ctx context.Context, username string, password string, appID uint32) (token string, err error)
+	Login(ctx context.Context, username string, password string, appID uint32) (token models.Tokens, err error)
 	Logout(ctx context.Context, token string) (success bool, err error)
 	Register(ctx context.Context, username string, password string) error
 	IsAdmin(ctx context.Context, username string) (isAdmin bool, err error)
+	RefreshToken(ctx context.Context, token, expired_at string) (*models.Token, error)
 }
 
 // Объект реализует gRPC-сервер для сервиса аутентификации с обязательными методами.
@@ -38,26 +40,28 @@ func (s *AuthServer) Login(
 	ctx context.Context,
 	req *sso_v1.LoginRequest,
 ) (*sso_v1.LoginResponse, error) {
-	if req.Username == "" {
-		return nil, status.Error(codes.InvalidArgument, "username is required")
-	}
-
-	if req.Password == "" {
-		return nil, status.Error(codes.InvalidArgument, "username is required")
-	}
-
-	if req.Metadata.AppId == 0 {
-		return nil, status.Error(codes.InvalidArgument, "appID is required")
-	}
-
-	token, err := s.auth.Login(ctx, req.GetUsername(), req.GetPassword(), req.Metadata.GetAppId())
+	tokens, err := s.auth.Login(ctx, req.GetUsername(), req.GetPassword(), req.Metadata.GetAppId())
 	if err != nil {
+		var valErr *models.ValidationError
+		if errors.As(err, &valErr) {
+			return nil, status.Error(codes.InvalidArgument, valErr.Error())
+		}
 		if errors.Is(err, auth.ErrInvalidCredentials) {
 			return nil, status.Error(codes.InvalidArgument, "invalid login or password")
 		}
+		return nil, status.Error(codes.Internal, "internal error")
 	}
 
-	return &sso_v1.LoginResponse{Token: token}, nil
+	return &sso_v1.LoginResponse{
+		AccessToken: &sso_v1.UserToken{
+			Token:     tokens.AccessToken.Token,
+			ExpiredAt: strconv.FormatInt(tokens.AccessToken.Expire_at, 10),
+		},
+		RefreshToken: &sso_v1.UserToken{
+			Token:     tokens.RefreshToken.Token,
+			ExpiredAt: strconv.FormatInt(tokens.RefreshToken.Expire_at, 10),
+		},
+	}, nil
 
 }
 
@@ -73,22 +77,15 @@ func (s *AuthServer) Register(
 	ctx context.Context,
 	req *sso_v1.RegisterRequest,
 ) (*sso_v1.RegisterResponse, error) {
-	if req.Username == "" {
-		return nil, status.Error(codes.InvalidArgument, "username is required")
-	}
-
-	if strings.Contains(req.Username, " ") {
-		return nil, status.Error(codes.InvalidArgument, "username contains spaces")
-	}
-
-	if req.Password == "" {
-		return nil, status.Error(codes.InvalidArgument, "password is required")
-	}
-
 	err := s.auth.Register(ctx, req.GetUsername(), req.GetPassword())
 	if err != nil {
 		if errors.Is(err, storage.ErrUserExist) {
 			return nil, status.Error(codes.AlreadyExists, "user already exist")
+		}
+
+		var errVal *models.ValidationError
+		if errors.As(err, &errVal) {
+			return nil, status.Error(codes.InvalidArgument, errVal.Error())
 		}
 
 		return nil, status.Error(codes.Internal, "failed to register user")
@@ -102,5 +99,12 @@ func (s *AuthServer) IsAdmin(
 	ctx context.Context,
 	req *sso_v1.IsAdminRequest,
 ) (*sso_v1.IsAdminResponse, error) {
+	panic("implement me!")
+}
+
+func (s *AuthServer) RefreshToken(
+	ctx context.Context,
+	req *sso_v1.RefreshTokenRequest,
+) (*sso_v1.LoginResponse, error) {
 	panic("implement me!")
 }

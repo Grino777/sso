@@ -1,5 +1,6 @@
 {
     "sqltools.useNodeRuntime": true,
+<<<<<<< HEAD
     "sqltools.connections": [
         {
             "previewLimit": 50,
@@ -8,6 +9,8 @@
             "database": "storage/sso.sqlite3"
         }
     ],
+=======
+>>>>>>> api-server
     "editor.wordWrap": "on",
     "[yaml]": {
         "editor.insertSpaces": true,
@@ -16,5 +19,9 @@
         "diffEditor.ignoreTrimWhitespace": false,
         "editor.defaultColorDecorators": "never",
         "editor.defaultFormatter": "redhat.vscode-yaml"
+    },
+    "go.formatTool": "goimports",
+    "[go]": {
+        "editor.formatOnSave": true
     }
 }

@@ -2,6 +2,8 @@ package redis
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -13,169 +15,145 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+var (
+	ErrCacheNotFound = errors.New("data not cached")
+)
+
+const opRedis = "storage.redis."
+
 type RedisStorage struct {
-	mu         sync.RWMutex
-	cfg        config.RedisConfig
-	client     *redis.Client
-	maxRetries int
-	retryDelay time.Duration // Задержка перед переподключением
-	log        *slog.Logger
+	Mu         sync.RWMutex
+	Cfg        config.RedisConfig
+	Client     *redis.Client
+	MaxRetries int
+	RetryDelay time.Duration // Задержка перед переподключением
+	Logger     *slog.Logger
 }
 
-func New(cfg config.RedisConfig, log *slog.Logger) *RedisStorage {
+func NewRedisStorage(cfg config.RedisConfig, log *slog.Logger) (*RedisStorage, error) {
 	store := &RedisStorage{
-		cfg:        cfg,
-		maxRetries: 5,
-		retryDelay: 4 * time.Second,
-		log:        log,
+		Cfg:        cfg,
+		MaxRetries: cfg.MaxRetries,
+		RetryDelay: 4 * time.Second,
+		Logger:     log,
 	}
-
-	if err := store.connectWithRetry(store.maxRetries); err != nil {
-		panic("failed to connect to redis")
-	}
-
-	go store.listenConnection()
-
-	return store
+	return store, nil
 }
 
-func (rs *RedisStorage) connect() error {
-	rs.mu.Lock()
-	defer rs.mu.Unlock()
+// -----------------------------------User Block-----------------------------------
 
-	if rs.client != nil {
-		rs.client.Close()
-	}
+func (rs *RedisStorage) SaveUser(
+	ctx context.Context,
+	user models.User,
+	appID uint32,
+) (models.User, error) {
+	const op = opRedis + "SaveUser"
 
-	options := &redis.Options{
-		Addr:         rs.cfg.Addr,
-		Password:     rs.cfg.Password,
-		Username:     rs.cfg.User,
-		DB:           rs.cfg.DB,
-		MaxRetries:   rs.cfg.MaxRetries,
-		DialTimeout:  rs.cfg.DialTimeout,
-		ReadTimeout:  rs.cfg.Timeout,
-		WriteTimeout: rs.cfg.Timeout,
-	}
-
-	client := redis.NewClient(options)
-
-	ctx, cancel := context.WithTimeout(context.Background(), rs.retryDelay)
-	defer cancel()
-	if err := client.Ping(ctx).Err(); err != nil {
-		client.Close()
-		return err
-	}
-
-	rs.client = client
-
-	return nil
-
-}
-
-func (rs *RedisStorage) connectWithRetry(maxAttempts int) error {
-	var lastErr error
-	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		if err := rs.connect(); err == nil {
-			rs.log.Info("redis connection established")
-			return nil
-		} else {
-			lastErr = err
-			rs.log.Warn("failed to connect to redis",
-				"atempt", attempt,
-				"error", lastErr,
-				"retryAfter", rs.retryDelay,
-			)
-			if attempt < maxAttempts {
-				time.Sleep(rs.retryDelay)
-			}
-		}
-	}
-	return fmt.Errorf("failed to connect after %d attempts: %w", maxAttempts, lastErr)
-}
-
-func (rs *RedisStorage) listenConnection() {
-	ticker := time.NewTicker(10 * time.Second)
-	defer ticker.Stop()
-
-	for range ticker.C {
-		rs.mu.Lock()
-		client := rs.client
-		rs.mu.Unlock()
-
-		ctx, cancel := context.WithTimeout(context.Background(), rs.retryDelay)
-		if client != nil {
-			if err := client.Ping(ctx).Err(); err != nil {
-				rs.connectWithRetry(rs.maxRetries)
-			}
-		} else {
-			panic("redis client is nil")
-
+	return withClient(ctx, rs, func(rc *redis.Client) (models.User, error) {
+		data, err := json.Marshal(user)
+		if err != nil {
+			return models.User{}, err
 		}
 
-		cancel()
-	}
-}
-
-func (rs *RedisStorage) withClient(ctx context.Context, fn func(*redis.Client) error) error {
-	rs.mu.RLock()
-	client := rs.client
-	rs.mu.RUnlock()
-
-	if client == nil {
-		return fmt.Errorf("redis client is not initialized")
-	}
-
-	if err := client.Ping(ctx).Err(); err != nil {
-		rs.log.Warn("redis connection lost, attempting reconnect", "error", err)
-		if err := rs.connectWithRetry(3); err != nil {
-			return fmt.Errorf("failed to reconnect: %w", err)
+		resString := fmt.Sprintf("users:%d:%s", appID, user.Username)
+		err = rc.Set(ctx, resString, data, rs.Cfg.TokenTTL).Err()
+		if err != nil {
+			return models.User{}, fmt.Errorf("%s: %v", op, err)
 		}
-		rs.mu.RLock()
-		client = rs.client
-		rs.mu.RUnlock()
-	}
-
-	return fn(client)
-}
-
-func (rs *RedisStorage) SaveUser(ctx context.Context, username string, passHash string) error {
-	return rs.withClient(ctx, func(client *redis.Client) error {
-		return client.Set(ctx, username, passHash, 0).Err()
+		rs.Logger.Debug("user successfuly cached", "username", user.Username)
+		return models.User{}, nil
 	})
 }
 
-// FIXME
-func (rs *RedisStorage) GetUser(ctx context.Context, username string, appID uint32) (models.User, error) {
-	panic("implement me!")
-}
+func (rs *RedisStorage) GetUser(
+	ctx context.Context,
+	username string,
+	appID uint32,
+) (models.User, error) {
+	const op = opRedis + "GetUser"
 
-// FIXME
-func (rs *RedisStorage) GetApp(ctx context.Context, appID uint32) (app models.App, err error) {
-	panic("implement me!")
-}
-
-// FIXME
-func (rs *RedisStorage) IsAdmin(ctx context.Context, username string) (isAdmin bool, err error) {
-	panic("implement me!")
-}
-
-// FIXME
-func (rs *RedisStorage) SaveUserToken(ctx context.Context,
-	user models.User,
-	app models.App,
-) error {
-	panic("implement me!")
-}
-
-// Close Redis session
-func (rs *RedisStorage) Close() error {
-	rs.mu.Lock()
-	defer rs.mu.Unlock()
-
-	if rs.client != nil {
-		rs.client.Close()
+	key := fmt.Sprintf("users:%d:%s", appID, username)
+	result, err := withClient(ctx, rs, func(rc *redis.Client) (string, error) {
+		return rc.Get(ctx, key).Result()
+	})
+	if err != nil {
+		if err == redis.Nil {
+			return models.User{}, fmt.Errorf("%s: %w for username %s and appID %d", op, ErrCacheNotFound, username, appID)
+		}
+		return models.User{}, fmt.Errorf("%s: failed to get user: %w", op, err)
 	}
 
+	var user models.User
+	if err := json.Unmarshal([]byte(result), &user); err != nil {
+		return models.User{}, fmt.Errorf("%s: failed to unmarshal user: %w", op, err)
+	}
+
+	return user, nil
+}
+
+// FIXME
+func (rs *RedisStorage) IsAdmin(
+	ctx context.Context,
+	user models.User,
+	app models.App,
+) (bool, error) {
+	panic("implement me!")
+}
+
+// -----------------------------------End Block------------------------------------
+
+// -----------------------------------App Block------------------------------------
+
+func (rs *RedisStorage) GetApp(
+	ctx context.Context,
+	appID uint32,
+) (models.App, error) {
+	const op = opRedis + "GetApp"
+
+	key := fmt.Sprintf("apps:%d", appID)
+	result, err := withClient(ctx, rs, func(rc *redis.Client) (string, error) {
+		return rc.Get(ctx, key).Result()
+	})
+	if err != nil {
+		if err == redis.Nil {
+			return models.App{}, fmt.Errorf("%s: %w for appID %d", op, ErrCacheNotFound, appID)
+		}
+		return models.App{}, fmt.Errorf("%s: failed to get app: %w", op, err)
+	}
+
+	var app models.App
+	if err := json.Unmarshal([]byte(result), &app); err != nil {
+		return models.App{}, fmt.Errorf("%s: failed to unmarshal user: %w", op, err)
+	}
+
+	return app, nil
+}
+
+func (rs *RedisStorage) SaveApp(
+	ctx context.Context,
+	app models.App,
+) error {
+	const op = opRedis + "SaveApp"
+
+	key := fmt.Sprintf("apps:%d", app.ID)
+	_, err := withClient(ctx, rs, func(rc *redis.Client) (models.App, error) {
+		data, err := json.Marshal(app)
+		if err != nil {
+			return models.App{}, fmt.Errorf("%s: %v", op, err)
+		}
+
+		_, err = rc.Set(ctx, key, data, 0).Result()
+		if err != nil {
+			return models.App{}, fmt.Errorf("%s: %v", op, err)
+		}
+
+		rs.Logger.Info("app added to cache", "appID", app.ID)
+		return models.App{}, nil
+	})
+	if err != nil {
+		return fmt.Errorf("%s: %v", op, err)
+	}
 	return nil
 }
+
+// -----------------------------------End Block------------------------------------

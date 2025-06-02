@@ -7,7 +7,7 @@ import (
 )
 
 // FIXME
-func (s *SQLiteStorage) saveUserToken(ctx context.Context,
+func (s *SQLiteStorage) SaveUserToken(ctx context.Context,
 	user models.User,
 	app models.App,
 ) error {

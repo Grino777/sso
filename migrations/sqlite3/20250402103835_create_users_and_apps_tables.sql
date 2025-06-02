@@ -21,8 +21,7 @@ CREATE TABLE
 CREATE TABLE
     apps (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name VARCHAR(50) NOT NULL,
-        secret TEXT NOT NULL
+        name VARCHAR(50) NOT NULL
     );
 
 -- +goose StatementEnd
