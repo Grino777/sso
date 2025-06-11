@@ -27,7 +27,7 @@ const (
 
 func (a *SSOApp) initApiServer() {
 	server := admin.NewApiServer(a.Logger, a.Config.ApiServer)
-	a.ApiServer = server
+	a.Apps.Api = server
 	a.Logger.Debug("api server successfully initialized")
 }
 
@@ -57,7 +57,7 @@ func (a *SSOApp) initDB() error {
 			slog.String("db_type", a.Config.Database.DBType),
 		)
 	}
-	a.Storage = db
+	a.Storages.Db = db
 	log.Debug("db initialized successfully")
 	return nil
 }
@@ -68,22 +68,20 @@ func (a *SSOApp) initCache() error {
 	log := a.Logger.With(slog.String("op", op))
 
 	// FIXME
-	redis, err := redisApp.NewRedisStorage(a.Config.Redis, a.Logger)
-	if err != nil {
-		log.Error("cache initialized failed: %v", logger.Error(err))
-	}
-	a.CacheStorage = redis
-	log.Debug("cache initialized successfully")
+	redis := redisApp.NewRedisStorage(a.Logger, a.Config.Redis, a.internal.errChan)
+
+	a.Storages.Cache = redis
+	log.Debug("cache initialized successfully", slog.String("addr", a.Config.Redis.Addr))
 	return nil
 }
 
-func (a *SSOApp) initGRPCServer(s *AppServices) {
-	grpcServer := grpcapp.New(a.Logger, s, a.Config)
-	a.GRPCServer = grpcServer
+func (a *SSOApp) initGRPCApp(s *GrpcServices) {
+	grpcApp := grpcapp.NewGrpcApp(a.Logger, s, a.Config)
+	a.Apps.Grpc = grpcApp
 	a.Logger.Debug("gRPC server successfully initialized")
 }
 
-func (a *SSOApp) initServices() *AppServices {
+func (a *SSOApp) initServices() *GrpcServices {
 	const op = "app.initServices"
 
 	jwksService, err := a.initJwksService()
@@ -98,8 +96,8 @@ func (a *SSOApp) initServices() *AppServices {
 
 	authConfigs := auth.AuthService{
 		Logger:      a.Logger,
-		DB:          a.Storage,
-		Cache:       a.CacheStorage,
+		DB:          a.Storages.Db,
+		Cache:       a.Storages.Cache,
 		Tokens:      a.Config.Tokens,
 		JwksService: jwksService,
 	}
@@ -107,7 +105,7 @@ func (a *SSOApp) initServices() *AppServices {
 	authService := auth.NewAuthService(authConfigs)
 	a.Logger.Debug("all services successfully initialized")
 
-	return &AppServices{
+	return &GrpcServices{
 		jwksService: jwksService,
 		authService: authService,
 	}
@@ -116,9 +114,9 @@ func (a *SSOApp) initServices() *AppServices {
 func (a *SSOApp) initJwksService() (*jwks.JwksService, error) {
 	const op = "app.initJwksService"
 
-	jwksService, err := jwks.New(a.Logger, a.Config.FS.KeysDir, a.Config.Tokens.TokenTTL)
+	jwksService, err := jwks.NewJwksService(a.Logger, a.Config.FS.KeysDir, a.Config.Tokens.TokenTTL)
 	if err != nil {
-		return nil, fmt.Errorf("%s: %v", op, err)
+		return nil, fmt.Errorf("%s: %w", op, err)
 	}
 	a.Logger.Debug("jwks service successfully initialized")
 
@@ -143,7 +141,7 @@ func (a *SSOApp) loadConfig() error {
 				slog.String("mode", config.GetModeFlag()),
 			)
 			config.GetFlagSet().Usage()
-			return fmt.Errorf("%s: %v", op, err)
+			return fmt.Errorf("%s: %w", op, err)
 		} else if errors.Is(err, config.ErrDbFlag) {
 			log.Error(
 				"invalid db flag",
@@ -151,19 +149,19 @@ func (a *SSOApp) loadConfig() error {
 				slog.String("db", config.GetDbFlag()),
 			)
 			config.GetFlagSet().Usage()
-			return fmt.Errorf("%s: %v", op, err)
+			return fmt.Errorf("%s: %w", op, err)
 		} else if os.IsNotExist(err) {
 			log.Error(
 				"config file not found",
 				logger.Error(err),
 			)
-			return fmt.Errorf("%s: %v", op, err)
+			return fmt.Errorf("%s: %w", op, err)
 		} else {
 			log.Error(
 				"configuration loading error",
 				logger.Error(err),
 			)
-			return fmt.Errorf("%s: %v", op, err)
+			return fmt.Errorf("%s: %w", op, err)
 		}
 	}
 	a.Config = cfg

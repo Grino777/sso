@@ -62,7 +62,7 @@ func (s *AuthService) Login(
 
 	err := ValidateData(ctx, username, password, appID)
 	if err != nil {
-		log.Error("%s:%v", op, err)
+		log.Error("%s:%w", op, err)
 		return models.Tokens{}, err
 	}
 
@@ -115,7 +115,7 @@ func (s *AuthService) Register(
 	_, err := s.DB.GetUser(ctx, username)
 	if err != nil {
 		if !errors.Is(err, storage.ErrUserNotFound) {
-			log.Error("%s:%v", op, err)
+			log.Error("%s:%w", op, err)
 			return err
 		}
 	} else {
@@ -125,14 +125,14 @@ func (s *AuthService) Register(
 
 	err = ValidateUser(username, password)
 	if err != nil {
-		log.Error("%s:%v", op, err)
+		log.Error("%s:%w", op, err)
 		return err
 	}
 
 	passHash, err := authU.CreatePassHash(password)
 	if err != nil {
-		log.Error("failed to generate pass hash %v", logger.Error(err))
-		return fmt.Errorf("%s: %v", op, err)
+		log.Error("failed to generate pass hash %w", logger.Error(err))
+		return fmt.Errorf("%s: %w", op, err)
 	}
 
 	err = s.DB.SaveUser(ctx, username, passHash)

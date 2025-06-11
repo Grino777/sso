@@ -48,7 +48,7 @@ func ValidateData(
 func (s *AuthService) generateUserTokens(ctx context.Context, user models.User, app models.App) (models.User, error) {
 	const op = authUOp + "generateUserTokens"
 
-	log := s.Logger.With(slog.String("op", op))
+	log := s.Logger.With(slog.String("op", op), slog.String("username", user.Username))
 
 	privateKey, err := s.JwksService.GetLatestPrivateKey(ctx)
 	if err != nil {

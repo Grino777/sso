@@ -131,6 +131,7 @@ type RedisConfig struct {
 	User        string        `yaml:"user"`
 	DB          int           `yaml:"db" env-default:"0"`
 	MaxRetries  int           `yaml:"max_retries" env-default:"5"`
+	RetryDelay  time.Duration `yaml:"retry_delay" env-default:"5s"` // Задержка между переподключениями
 	DialTimeout time.Duration `yaml:"dial_timeout" env-default:"10s"`
 	Timeout     time.Duration `yaml:"timeout" env-default:"5s"`
 	TokenTTL    time.Duration `yaml:"tokenTTL" env-default:"1h"`

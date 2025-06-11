@@ -17,16 +17,16 @@ type JwksService struct {
 	keysStore *keys.KeysStore
 }
 
-func New(
+func NewJwksService(
 	log *slog.Logger,
 	keysDir string,
 	tokenTTL time.Duration,
 ) (*JwksService, error) {
 	const op = "jwks.New"
 
-	ks, err := keys.New(log, keysDir, tokenTTL)
+	ks, err := keys.NewKeysStore(log, keysDir, tokenTTL)
 	if err != nil {
-		return nil, fmt.Errorf("%s: %v", op, err)
+		return nil, fmt.Errorf("%s: %w", op, err)
 	}
 
 	return &JwksService{
@@ -40,7 +40,7 @@ func (j *JwksService) GetJwks(context.Context) ([]*sso.Jwk, error) {
 
 	publicKeys, err := j.keysStore.GetPublicKeys()
 	if err != nil {
-		j.log.Error("%s: %v", op, err)
+		j.log.Error("%s: %w", op, err)
 		return nil, err
 	}
 

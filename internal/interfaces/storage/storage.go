@@ -6,6 +6,7 @@ import (
 	"github.com/Grino777/sso/internal/domain/models"
 )
 
+//go:generate mockgen -source=storage.go -destination=mocks/storage/storage_mock.go -package=mocks_storage
 type Storage interface {
 	StorageUserProvider
 	StorageAppProvider

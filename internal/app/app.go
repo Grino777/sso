@@ -6,7 +6,6 @@ import (
 	"sync"
 	"time"
 
-	grpcapp "github.com/Grino777/sso/internal/app/grpc"
 	"github.com/Grino777/sso/internal/config"
 	storageI "github.com/Grino777/sso/internal/interfaces/storage"
 	"github.com/Grino777/sso/internal/lib/logger"
@@ -16,44 +15,63 @@ import (
 
 const opApp = "app."
 
+//go:generate mockgen -source=app.go -destination=mocks/admin/admin_api_mock.go -package=admin
 type AdminApi interface {
 	RegisterRoutes()
 	Run(ctx context.Context) error
 	Stop() error
 }
 
-type AdminService interface {
-	RotateJwksService() error
+//go:generate mockgen -source=app.go -destination=mocks/grpc/grpc_app_mock.go -package=grpc
+type grpcApp interface {
+	Run(ctx context.Context) error
+	Stop()
+}
+
+type Apps struct {
+	Grpc grpcApp
+	Api  AdminApi
+}
+
+// Contains storages for App
+type Storages struct {
+	Db    storageI.Storage
+	Cache storageI.CacheStorage
+}
+
+// Internal variables for App
+type Internal struct {
+	errChan chan error
+	cancel  context.CancelFunc
 }
 
 type SSOApp struct {
-	Config       *config.Config
-	Logger       *slog.Logger
-	GRPCServer   *grpcapp.GRPCApp
-	Storage      storageI.Storage
-	CacheStorage storageI.CacheStorage
-	ApiServer    AdminApi
-	cancel       context.CancelFunc
+	Config   *config.Config
+	Logger   *slog.Logger
+	Storages Storages
+	Apps     Apps
+	internal Internal
 }
 
-type AppServices struct {
+type GrpcServices struct {
 	jwksService *jwks.JwksService
 	authService *auth.AuthService
 }
 
-type AuthConfig struct {
-	Log         *slog.Logger
-	DB          storageI.Storage
-	Cache       storageI.CacheStorage
-	Tokens      config.TokenConfig
-	JwksService *jwks.JwksService
-}
+// FIXME удалить
+// type AuthConfig struct {
+// 	Log         *slog.Logger
+// 	DB          storageI.Storage
+// 	Cache       storageI.CacheStorage
+// 	Tokens      config.TokenConfig
+// 	JwksService *jwks.JwksService
+// }
 
-func (s *AppServices) Auth() *auth.AuthService {
+func (s *GrpcServices) Auth() *auth.AuthService {
 	return s.authService
 }
 
-func (s *AppServices) Jwks() *jwks.JwksService {
+func (s *GrpcServices) Jwks() *jwks.JwksService {
 	return s.jwksService
 }
 
@@ -68,11 +86,14 @@ func NewApp(
 
 	app.initDB()
 	app.initCache()
+	services := app.initServices()
+	app.initGRPCApp(services)
+	app.initApiServer()
 
 	return app, nil
 }
 
-func (a *SSOApp) Run(mainChan chan error) {
+func (a *SSOApp) Run(mainErrChan chan error) {
 	const op = opApp + "Run"
 
 	var wg sync.WaitGroup
@@ -81,27 +102,23 @@ func (a *SSOApp) Run(mainChan chan error) {
 	log := a.Logger.With(slog.String("op", op))
 
 	ctx, cancel := context.WithCancel(context.Background())
-	a.cancel = cancel
+	a.internal.cancel = cancel
 
-	if err := a.Storage.Connect(ctx); err != nil {
+	if err := a.Storages.Db.Connect(ctx); err != nil {
 		log.Error("failed to connect database")
-		mainChan <- err
+		errChan <- err
 		return
 	}
-	if err := a.CacheStorage.Connect(ctx); err != nil {
+	if err := a.Storages.Cache.Connect(ctx, errChan); err != nil {
 		log.Error("failed to connect redis")
-		mainChan <- err
+		errChan <- err
 		return
 	}
 
-	services := a.initServices()
-	a.initGRPCServer(services)
-	a.initApiServer()
-
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		if err := a.GRPCServer.Run(ctx); err != nil {
+		if err := a.Apps.Grpc.Run(ctx); err != nil {
 			errChan <- err
 		}
 	}()
@@ -109,21 +126,18 @@ func (a *SSOApp) Run(mainChan chan error) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		if err := a.ApiServer.Run(ctx); err != nil {
+		if err := a.Apps.Api.Run(ctx); err != nil {
 			errChan <- err
 		}
 	}()
 
-	go func() {
-		select {
-		case <-ctx.Done():
-			log.Debug("stop signal recived")
-		case err := <-errChan:
-			a.Logger.Error("server failed", logger.Error(err))
-			mainChan <- err
-			a.cancel()
-		}
-	}()
+	select {
+	case <-ctx.Done():
+		log.Debug("stop signal received, initiating shutdown")
+	case err := <-errChan:
+		a.Logger.Error("server failed", logger.Error(err))
+		mainErrChan <- err
+	}
 
 	wg.Wait()
 }
@@ -131,28 +145,20 @@ func (a *SSOApp) Run(mainChan chan error) {
 func (a *SSOApp) Stop() {
 	const op = "app.Stop"
 
-	log := a.Logger.With(slog.String("op", op))
+	a.internal.cancel()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	log := a.Logger.With(slog.String("op", op))
+	db := a.Storages.Db
+	cache := a.Storages.Cache
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	if a.Storage != nil {
-		if err := a.Storage.Close(ctx); err != nil {
-			log.Error("failed to close db session", logger.Error(err))
-		}
+	if err := db.Close(ctx); err != nil {
+		log.Error("failed to close db session", logger.Error(err))
 	}
-	if a.CacheStorage != nil {
-		if err := a.CacheStorage.Close(ctx); err != nil {
-			log.Error("failed to close redis session", logger.Error(err))
-		}
-	}
-	if a.ApiServer != nil {
-		if err := a.ApiServer.Stop(); err != nil {
-			log.Error("failed to stopping api server", logger.Error(err))
-		}
-	}
-	if a.GRPCServer != nil {
-		a.GRPCServer.Stop()
+	if err := cache.Close(ctx); err != nil {
+		log.Error("failed to close redis session", logger.Error(err))
 	}
 
 	log.Debug("application stopped")

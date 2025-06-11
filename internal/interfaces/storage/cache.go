@@ -6,10 +6,11 @@ import (
 	"github.com/Grino777/sso/internal/domain/models"
 )
 
+//go:generate mockgen -source=cache.go -destination=mocks/cache/redis_storage_mock.go -package=mock_cache
 type CacheStorage interface {
 	CacheUserProvider
 	CacheAppProvider
-	Connector
+	CacheConnector
 }
 
 type CacheUserProvider interface {
@@ -23,6 +24,7 @@ type CacheAppProvider interface {
 	SaveApp(ctx context.Context, app models.App) error
 }
 
-// type CacheUtilsProvider interface {
-// 	MonitorRedisConnection(ctx context.Context, log *slog.Logger, errChan chan error)
-// }
+type CacheConnector interface {
+	Connect(ctx context.Context, errChan chan<- error) error
+	Close(ctx context.Context) error
+}

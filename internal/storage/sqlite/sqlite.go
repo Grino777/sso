@@ -87,7 +87,7 @@ func (s *SQLiteStorage) GetUser(
 		if err == sql.ErrNoRows {
 			return user, storage.ErrUserNotFound
 		}
-		return user, fmt.Errorf("%s: %v", op, err)
+		return user, fmt.Errorf("%s: %w", op, err)
 	}
 	return user, nil
 }
@@ -110,7 +110,7 @@ func (s *SQLiteStorage) GetApp(
 		if err == sql.ErrNoRows {
 			return app, storage.ErrUserNotFound
 		}
-		return app, fmt.Errorf("%s: %v", op, err)
+		return app, fmt.Errorf("%s: %w", op, err)
 	}
 	return app, nil
 }

@@ -13,7 +13,8 @@ redis:
   password: ""
   user: ""
   db: 0
-  max_retries: 2
+  max_retries: 3
+  retry_delay: "5s"
   dial_timeout: "10s"
   timeout: "5s"
   tokenTTL: "1h"

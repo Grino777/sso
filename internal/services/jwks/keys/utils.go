@@ -366,7 +366,7 @@ func createKeysFolder(ks *KeysStore) error {
 }
 
 // Перевод PublicKey в формат для передачи клиентам
-func convertToJWKS(pubKeyObj *models.PublicKey) (*models.JWKSToken, error) {
+func convertPubKeyToJWKS(pubKeyObj *models.PublicKey) (*models.JWKSToken, error) {
 	pubKey := pubKeyObj.Key
 	n := base64.RawURLEncoding.EncodeToString(pubKey.N.Bytes())
 	e := base64.RawURLEncoding.EncodeToString(big.NewInt(int64(pubKey.E)).Bytes())

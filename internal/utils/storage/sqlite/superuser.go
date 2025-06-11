@@ -18,7 +18,7 @@ func CreateSuperUser(
 	var count int
 	err := db.QueryRow(query).Scan(&count)
 	if err != nil {
-		return fmt.Errorf("error getting superuser from DB: %v", err)
+		return fmt.Errorf("error getting superuser from DB: %w", err)
 	}
 
 	if count > 0 {
@@ -27,13 +27,13 @@ func CreateSuperUser(
 
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
-		return fmt.Errorf("%s: error creating password for superuser: %v", op, err)
+		return fmt.Errorf("%s: error creating password for superuser: %w", op, err)
 	}
 
 	query = "INSERT INTO users (username, pass_hash, role_id) VALUES (?, ?, 3)"
 	_, err = db.Exec(query, username, string(hashedPassword))
 	if err != nil {
-		return fmt.Errorf("%s: error inserting superuser to DB: %v", op, err)
+		return fmt.Errorf("%s: error inserting superuser to DB: %w", op, err)
 	}
 
 	return nil

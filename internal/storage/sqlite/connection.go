@@ -15,7 +15,7 @@ func (s *SQLiteStorage) Connect(ctx context.Context) error {
 
 	db, err := sql.Open(s.driverName, s.localPath)
 	if err != nil {
-		return fmt.Errorf("%s: failed to connect to database: %v", op, err)
+		return fmt.Errorf("%s: failed to connect to database: %w", op, err)
 	}
 
 	s.db = db
@@ -24,7 +24,7 @@ func (s *SQLiteStorage) Connect(ctx context.Context) error {
 		return err
 	}
 	if err := sUtils.CreateSuperUser(s.db, s.superuser.Username, s.superuser.Password); err != nil {
-		return fmt.Errorf("%s: %v", op, err)
+		return fmt.Errorf("%s: %w", op, err)
 	}
 
 	s.logger.Debug("database connection successfully")
@@ -35,10 +35,13 @@ func (s *SQLiteStorage) Connect(ctx context.Context) error {
 func (s *SQLiteStorage) Close(ctx context.Context) error {
 	const op = sqliteOp + "Close"
 
-	if err := s.db.Close(); err != nil {
-		s.logger.Error("failed to closing sqlite connection")
-		s.db = nil
-		return fmt.Errorf("%s: %v", op, err)
+	if s.db != nil {
+		if err := s.db.Close(); err != nil {
+			s.logger.Error("failed to closing sqlite connection")
+			s.db = nil
+			return fmt.Errorf("%s: %w", op, err)
+		}
 	}
+
 	return nil
 }

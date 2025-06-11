@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
-	"time"
 
 	"github.com/Grino777/sso/internal/config"
 	"github.com/Grino777/sso/internal/domain/models"
@@ -22,22 +21,19 @@ var (
 const opRedis = "storage.redis."
 
 type RedisStorage struct {
-	Mu         sync.RWMutex
-	Cfg        config.RedisConfig
-	Client     *redis.Client
-	MaxRetries int
-	RetryDelay time.Duration // Задержка перед переподключением
-	Logger     *slog.Logger
+	mu      sync.RWMutex
+	cfg     config.RedisConfig
+	client  *redis.Client
+	logger  *slog.Logger
+	errChan chan<- error
 }
 
-func NewRedisStorage(cfg config.RedisConfig, log *slog.Logger) (*RedisStorage, error) {
+func NewRedisStorage(log *slog.Logger, cfg config.RedisConfig, errChan chan error) *RedisStorage {
 	store := &RedisStorage{
-		Cfg:        cfg,
-		MaxRetries: cfg.MaxRetries,
-		RetryDelay: 4 * time.Second,
-		Logger:     log,
+		cfg:    cfg,
+		logger: log,
 	}
-	return store, nil
+	return store
 }
 
 // -----------------------------------User Block-----------------------------------
@@ -56,11 +52,11 @@ func (rs *RedisStorage) SaveUser(
 		}
 
 		resString := fmt.Sprintf("users:%d:%s", appID, user.Username)
-		err = rc.Set(ctx, resString, data, rs.Cfg.TokenTTL).Err()
+		err = rc.Set(ctx, resString, data, rs.cfg.TokenTTL).Err()
 		if err != nil {
-			return models.User{}, fmt.Errorf("%s: %v", op, err)
+			return models.User{}, fmt.Errorf("%s: %w", op, err)
 		}
-		rs.Logger.Debug("user successfuly cached", "username", user.Username)
+		rs.logger.Debug("user successfuly cached", "username", user.Username)
 		return models.User{}, nil
 	})
 }
@@ -139,19 +135,19 @@ func (rs *RedisStorage) SaveApp(
 	_, err := withClient(ctx, rs, func(rc *redis.Client) (models.App, error) {
 		data, err := json.Marshal(app)
 		if err != nil {
-			return models.App{}, fmt.Errorf("%s: %v", op, err)
+			return models.App{}, fmt.Errorf("%s: %w", op, err)
 		}
 
 		_, err = rc.Set(ctx, key, data, 0).Result()
 		if err != nil {
-			return models.App{}, fmt.Errorf("%s: %v", op, err)
+			return models.App{}, fmt.Errorf("%s: %w", op, err)
 		}
 
-		rs.Logger.Info("app added to cache", "appID", app.ID)
+		rs.logger.Info("app added to cache", "appID", app.ID)
 		return models.App{}, nil
 	})
 	if err != nil {
-		return fmt.Errorf("%s: %v", op, err)
+		return fmt.Errorf("%s: %w", op, err)
 	}
 	return nil
 }

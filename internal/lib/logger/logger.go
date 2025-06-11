@@ -5,7 +5,7 @@ import (
 	"log/slog"
 )
 
-func New(out io.Writer,
+func NewLogger(out io.Writer,
 	level slog.Level,
 ) *slog.Logger {
 	options := &slog.HandlerOptions{Level: level} // Используем переданный level

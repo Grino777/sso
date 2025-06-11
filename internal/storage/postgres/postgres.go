@@ -51,7 +51,7 @@ func (ps *PostgresStorage) Close(ctx context.Context) error {
 	const op = pgOp + "Close"
 
 	if err := ps.client.Close(ctx); err != nil {
-		return fmt.Errorf("%s: %v", op, err)
+		return fmt.Errorf("%s: %w", op, err)
 	}
 	return nil
 }

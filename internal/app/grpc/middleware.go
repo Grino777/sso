@@ -15,6 +15,7 @@ import (
 
 	sso_v1 "github.com/Grino777/sso-proto/gen/go/sso"
 	"github.com/Grino777/sso/internal/lib/logger"
+	"github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/logging"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -33,6 +34,14 @@ type ReqMetadata struct {
 	secret    string
 }
 
+// InterceptorLogger adapts slog logger to interceptor logger.
+// !!! This code is simple enough to be copied and not imported.
+func InterceptorLogger(l *slog.Logger) logging.Logger {
+	return logging.LoggerFunc(func(ctx context.Context, lvl logging.Level, msg string, fields ...any) {
+		l.Log(ctx, slog.Level(lvl), msg, fields...)
+	})
+}
+
 func HMACInterceptor(
 	log *slog.Logger,
 	services Services,
@@ -44,6 +53,10 @@ func HMACInterceptor(
 		info *grpc.UnaryServerInfo,
 		handler grpc.UnaryHandler,
 	) (any, error) {
+		const op = opGrpc + "HMACInterceptor"
+
+		log := log.With(slog.String("op", op))
+
 		switch mode {
 		case "local":
 			return handler(ctx, req)
@@ -55,14 +68,14 @@ func HMACInterceptor(
 
 // Валидирует запрос от приложений
 func validateHMAC(ctx context.Context,
-	sLog *slog.Logger,
+	log *slog.Logger,
 	req any,
 	services Services,
 	handler grpc.UnaryHandler,
 ) (any, error) {
-	const op = "grpcapp.middleware.validateHMAC"
+	const op = opGrpc + "validateHMAC"
 
-	log := sLog.With("op", op)
+	log = log.With("op", op)
 
 	md, exist := metadata.FromIncomingContext(ctx)
 	if !exist {
@@ -70,9 +83,9 @@ func validateHMAC(ctx context.Context,
 		return nil, status.Error(codes.Unauthenticated, "unauthenticated")
 	}
 
-	secret, err := getAppSecret(md)
+	secret, err := getMdAppSecret(md)
 	if err != nil {
-		log.Error("error: %v", logger.Error(err))
+		log.Error("failed to get app secret from metadata : %w", logger.Error(err))
 		return nil, status.Error(codes.Unauthenticated, err.Error())
 	}
 
@@ -88,7 +101,7 @@ func validateHMAC(ctx context.Context,
 	valid, err := validateSecret(rm, services)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			log.Error("app not found")
+			log.Error("app not found", logger.Error(err))
 		}
 
 		log.Error(
@@ -102,15 +115,11 @@ func validateHMAC(ctx context.Context,
 		return nil, status.Error(codes.Unauthenticated, "invalid data transmitted")
 	}
 
-	log.Debug(
-		"HMAC validated",
-		slog.String("timestamp", rm.timestamp),
-	)
 	return handler(ctx, req)
 }
 
 // Получает secret из запроса
-func getAppSecret(md metadata.MD) (secret string, err error) {
+func getMdAppSecret(md metadata.MD) (secret string, err error) {
 	appSecret, exist := md["authorization"]
 	if !exist || len(appSecret) == 0 {
 		return "", errAppSecret
@@ -147,9 +156,11 @@ func validateSecret(
 	rm *ReqMetadata,
 	services Services,
 ) (bool, error) {
+	const op = opGrpc + "validateSecret"
+
 	ts, err := time.Parse(time.RFC3339, rm.timestamp)
 	if err != nil {
-		return false, fmt.Errorf("failed parse timestamp: %w, %v", err, rm.timestamp)
+		return false, fmt.Errorf("%s: failed parse timestamp %s: %w", op, rm.timestamp, err)
 	}
 
 	ctx := context.Background()
@@ -157,7 +168,7 @@ func validateSecret(
 
 	now := time.Now().UTC()
 	if ts.Before(now.Add(-2*time.Minute)) || ts.After(now.Add(5*time.Second)) {
-		return false, fmt.Errorf("%w: current time %v", errInvalidTimestamp, now.Format(time.RFC3339))
+		return false, fmt.Errorf("%w: current time %s", errInvalidTimestamp, now.Format(time.RFC3339))
 	}
 
 	auth := services.Auth()

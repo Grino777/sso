@@ -18,11 +18,11 @@ func Migrate(db *sql.DB, driverName string) error {
 	goose.SetBaseFS(embedMigrations)
 
 	if err := goose.SetDialect("sqlite3"); err != nil {
-		return fmt.Errorf("%s: failed to set dialect: %v", op, err)
+		return fmt.Errorf("%s: failed to set dialect: %w", op, err)
 	}
 
 	if err := goose.Up(db, driverName); err != nil {
-		return fmt.Errorf("%s: failed to apply migrations: %v", op, err)
+		return fmt.Errorf("%s: failed to apply migrations: %w", op, err)
 	}
 	return nil
 }

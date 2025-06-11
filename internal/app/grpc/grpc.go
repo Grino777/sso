@@ -2,13 +2,15 @@ package grpc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
 
 	"github.com/Grino777/sso/internal/config"
-	grpcauth "github.com/Grino777/sso/internal/grpc/auth"
-	grpcjwks "github.com/Grino777/sso/internal/grpc/jwks"
+	grpcauth "github.com/Grino777/sso/internal/delivery/grpc/auth"
+	grpcjwks "github.com/Grino777/sso/internal/delivery/grpc/jwks"
+	"github.com/Grino777/sso/internal/lib/logger"
 	"github.com/Grino777/sso/internal/services/auth"
 	"github.com/Grino777/sso/internal/services/jwks"
 
@@ -20,6 +22,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
+
+const opGrpc = "app.grpc."
 
 type Services interface {
 	Auth() *auth.AuthService
@@ -34,13 +38,13 @@ type GRPCApp struct {
 	mode       string
 }
 
-func New(
+func NewGrpcApp(
 	log *slog.Logger,
 	services Services,
-	// db interfaces.Storage,
-	// cache interfaces.CacheStorage,
 	cfg *config.Config,
 ) *GRPCApp {
+
+	logger := log.With(slog.String("port", fmt.Sprint(cfg.GRPC.Port)))
 
 	loggingOpts := []logging.Option{
 		logging.WithLogOnEvents(logging.StartCall, logging.FinishCall),
@@ -64,7 +68,7 @@ func New(
 	grpcjwks.RegService(gRPCServer, services.Jwks())
 
 	return &GRPCApp{
-		log:        log,
+		log:        logger,
 		gRPCServer: gRPCServer,
 		port:       int(cfg.GRPC.Port),
 		mode:       cfg.Mode,
@@ -73,28 +77,47 @@ func New(
 
 // Run gRPC Server
 func (a *GRPCApp) Run(ctx context.Context) error {
-	const op = "grpcapp.Run"
+	const op = opGrpc + "Run"
 
-	l, err := net.Listen("tcp", fmt.Sprintf(":%d", a.port))
+	var errs []error
+
+	log := a.log.With(slog.String("op", op))
+	errChan := make(chan error, 1)
+
+	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", a.port))
 	if err != nil {
-		return fmt.Errorf("%s: %w", op, err)
+		return fmt.Errorf("server failed to start listening on port %d: %w", a.port, err)
 	}
 
-	a.log.Info(
-		"grpc server is running",
-		slog.String("addr", (l.Addr().String())),
-		slog.String("mode", a.mode),
-	)
+	defer func() {
+		if err := listener.Close(); err != nil {
+			log.Error("failed to close listener", logger.Error(err))
+			errs = append(errs, err)
+		}
+		log.Debug("listener successfully closed")
+	}()
 
-	if err := a.gRPCServer.Serve(l); err != nil && err != grpc.ErrServerStopped {
-		return fmt.Errorf("%s: %w", op, err)
+	go func() {
+		if err := a.gRPCServer.Serve(listener); err != nil && err != grpc.ErrServerStopped {
+			log.Error("failed to serve grpc server", logger.Error(err))
+			errChan <- fmt.Errorf("%s: %w", op, err)
+		}
+	}()
+
+	log.Info("grpc server is running")
+
+	select {
+	case <-ctx.Done(): // Context canceled
+	case err := <-errChan:
+		errs = append(errs, err)
 	}
-
-	<-ctx.Done()
-	a.log.Info("shutting down gRPC server")
 
 	a.Stop()
-	a.log.Info("gRPC server stopped")
+
+	if len(errs) > 0 {
+		return errors.Join(errs...)
+	}
+
 	return nil
 }
 
@@ -102,17 +125,6 @@ func (a *GRPCApp) Run(ctx context.Context) error {
 func (a *GRPCApp) Stop() {
 	const op = "grpcapp.Stop"
 
-	log := a.log.With(slog.String("op", op))
-
-	log.Debug("stoping gRPC server", slog.Int("port", int(a.port)))
 	a.gRPCServer.GracefulStop()
-	log.Info("gRPC server stopped")
-}
-
-// InterceptorLogger adapts slog logger to interceptor logger.
-// !!! This code is simple enough to be copied and not imported.
-func InterceptorLogger(l *slog.Logger) logging.Logger {
-	return logging.LoggerFunc(func(ctx context.Context, lvl logging.Level, msg string, fields ...any) {
-		l.Log(ctx, slog.Level(lvl), msg, fields...)
-	})
+	a.log.Info("gRPC server stopped", slog.String("op", op))
 }

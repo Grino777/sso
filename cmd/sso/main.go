@@ -13,12 +13,12 @@ import (
 )
 
 func main() {
-	log := logger.New(os.Stdout, slog.LevelDebug)
+	log := logger.NewLogger(os.Stdout, slog.LevelDebug)
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGTERM, syscall.SIGINT)
 
-	errChan := make(chan error, 1)
+	errChan := make(chan error, 5)
 
 	app, err := app.NewApp(log)
 	if err != nil {
@@ -26,14 +26,16 @@ func main() {
 		os.Exit(1)
 	}
 
-	app.Run(errChan)
+	go func() {
+		app.Run(errChan)
+	}()
 
 	select {
 	case <-stop:
-		log.Info("gracefully shutdown")
-	case <-errChan:
-		log.Error("stop app due to error")
+		log.Info("gracefully shutting down")
+		app.Stop()
+	case err := <-errChan:
+		log.Error("stopping app due to error", logger.Error(err))
+		app.Stop()
 	}
-
-	app.Stop()
 }

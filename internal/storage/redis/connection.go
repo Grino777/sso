@@ -10,74 +10,76 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-func (rs *RedisStorage) Connect(ctx context.Context) error {
+func (rs *RedisStorage) Connect(ctx context.Context, errChan chan<- error) error {
 	const op = opRedis + "Connect"
 
-	log := rs.Logger.With(slog.String("op", op))
+	log := rs.logger.With(slog.String("op", op))
 
-	if err := rs.connectWithRetry(rs.Cfg.MaxRetries); err != nil {
+	if err := rs.connectWithRetry(rs.cfg.MaxRetries); err != nil {
 		log.Error("failed to connect to Redis after retries", logger.Error(err))
 		return fmt.Errorf("%s: %w", op, err)
 	}
 
+	rs.errChan = errChan
 	log.Debug("redis connection established")
+
 	return nil
 }
 
 func (rs *RedisStorage) connectWithRetry(maxAttempts int) error {
 	const op = opRedis + "connectWithRetry"
 
-	log := rs.Logger.With(slog.String("op", op))
+	log := rs.logger.With(slog.String("op", op))
 
 	var lastErr error
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		rs.Mu.Lock()
-		if rs.Client != nil {
-			if err := rs.Client.Close(); err != nil {
+		rs.mu.Lock()
+		if rs.client != nil {
+			if err := rs.client.Close(); err != nil {
 				log.Warn("failed to close old Redis client", logger.Error(err))
 			}
-			rs.Client = nil
+			rs.client = nil
 		}
 
 		options := &redis.Options{
-			Addr:         rs.Cfg.Addr,
-			Password:     rs.Cfg.Password,
-			Username:     rs.Cfg.User,
-			DB:           rs.Cfg.DB,
-			MaxRetries:   rs.Cfg.MaxRetries,
-			DialTimeout:  rs.Cfg.DialTimeout,
-			ReadTimeout:  rs.Cfg.Timeout,
-			WriteTimeout: rs.Cfg.Timeout,
+			Addr:         rs.cfg.Addr,
+			Password:     rs.cfg.Password,
+			Username:     rs.cfg.User,
+			DB:           rs.cfg.DB,
+			MaxRetries:   rs.cfg.MaxRetries,
+			DialTimeout:  rs.cfg.DialTimeout,
+			ReadTimeout:  rs.cfg.Timeout,
+			WriteTimeout: rs.cfg.Timeout,
 		}
 
 		client := redis.NewClient(options)
-		rs.Mu.Unlock()
+		rs.mu.Unlock()
 
 		// Проверка соединения
-		ctx, cancel := context.WithTimeout(context.Background(), rs.RetryDelay)
+		ctx, cancel := context.WithTimeout(context.Background(), rs.cfg.DialTimeout)
 		if err := client.Ping(ctx).Err(); err != nil {
 			cancel() // Закрываем контекст сразу после ошибки
-			rs.Mu.Lock()
+			rs.mu.Lock()
 			if closeErr := client.Close(); closeErr != nil {
 				log.Warn("failed to close Redis client after failed ping", logger.Error(closeErr))
 			}
-			rs.Mu.Unlock()
+			rs.mu.Unlock()
 			lastErr = err
 			log.Warn("failed to connect to Redis",
 				slog.Int("attempt", attempt),
 				slog.Any("error", lastErr),
-				slog.Duration("retryAfter", rs.RetryDelay),
+				slog.Duration("retryAfter", rs.cfg.RetryDelay),
 			)
 			if attempt < maxAttempts {
-				time.Sleep(rs.RetryDelay)
+				time.Sleep(rs.cfg.RetryDelay)
 			}
 			continue
 		}
 		cancel() // Закрываем контекст после успешного пинга
 
-		rs.Mu.Lock()
-		rs.Client = client
-		rs.Mu.Unlock()
+		rs.mu.Lock()
+		rs.client = client
+		rs.mu.Unlock()
 
 		return nil
 	}
@@ -86,18 +88,18 @@ func (rs *RedisStorage) connectWithRetry(maxAttempts int) error {
 }
 
 func (rs *RedisStorage) Close(ctx context.Context) error {
-	rs.Mu.Lock()
-	defer rs.Mu.Unlock()
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
 
-	if rs.Client != nil {
-		if err := rs.Client.Close(); err != nil {
+	if rs.client != nil {
+		if err := rs.client.Close(); err != nil {
 			if err.Error() != "redis: client is closed" {
 				return fmt.Errorf("failed to close redis client: %w", err)
 			}
 		}
-		rs.Client = nil
+		rs.client = nil
 	}
-	rs.Logger.Debug("redis connection is closed")
+	rs.logger.Debug("redis connection is closed")
 	return nil
 }
 
@@ -108,22 +110,29 @@ func withClient[T any](
 ) (T, error) {
 	var zero T
 
-	rs.Mu.RLock()
-	client := rs.Client
-	rs.Mu.RUnlock()
+	rs.mu.RLock()
+	client := rs.client
+	errChan := rs.errChan
+	rs.mu.RUnlock()
 
 	if client == nil {
-		return zero, fmt.Errorf("redis client is not initialized")
-	}
-
-	if err := client.Ping(ctx).Err(); err != nil {
-		rs.Logger.Warn("redis connection lost, attempting reconnect", "error", err)
-		if err := rs.connectWithRetry(rs.Cfg.MaxRetries); err != nil {
+		if err := rs.connectWithRetry(rs.cfg.MaxRetries); err != nil {
+			errChan <- fmt.Errorf("failed to reconnect: %w", err)
 			return zero, fmt.Errorf("failed to reconnect: %w", err)
 		}
-		rs.Mu.RLock()
-		client = rs.Client
-		rs.Mu.RUnlock()
+		rs.mu.RLock()
+		client = rs.client
+		rs.mu.RUnlock()
+	}
+	if err := client.Ping(ctx).Err(); err != nil {
+		rs.logger.Warn("redis connection lost, attempting reconnect", "error", err)
+		if err := rs.connectWithRetry(rs.cfg.MaxRetries); err != nil {
+			errChan <- err
+			return zero, fmt.Errorf("failed to reconnect: %w", err)
+		}
+		rs.mu.RLock()
+		client = rs.client
+		rs.mu.RUnlock()
 	}
 
 	result, err := fn(client)

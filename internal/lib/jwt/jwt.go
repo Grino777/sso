@@ -59,7 +59,7 @@ func NewAccessToken(
 
 	tokenString, err := token.SignedString(pk.Key)
 	if err != nil {
-		return tObj, fmt.Errorf("%s: %v", op, err)
+		return tObj, fmt.Errorf("%s: %w", op, err)
 	}
 
 	tObj = models.Token{
@@ -77,7 +77,7 @@ func NewRefreshToken(d time.Duration) (models.Token, error) {
 	tokenBytes := make([]byte, tokenLenght)
 	_, err := rand.Read(tokenBytes)
 	if err != nil {
-		return models.Token{}, fmt.Errorf("%s: %v", op, err)
+		return models.Token{}, fmt.Errorf("%s: %w", op, err)
 	}
 
 	tokenString := base64.URLEncoding.EncodeToString(tokenBytes)

@@ -11,7 +11,7 @@ func CreatePassHash(pass string) (string, error) {
 
 	passHash, err := bcrypt.GenerateFromPassword([]byte(pass), bcrypt.DefaultCost)
 	if err != nil {
-		return "", fmt.Errorf("%s: %v", op, err)
+		return "", fmt.Errorf("%s: %w", op, err)
 	}
 	return string(passHash), nil
 }

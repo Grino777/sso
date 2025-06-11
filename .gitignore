@@ -28,7 +28,14 @@ storage/sso.sqlite3
 *__debug_*
 
 # Private & Public Keys
-keys
+/keys
 
-#Certs files
-certs
+# Certs files
+/certs
+
+# golintci-lint
+lint-log.log
+bin
+
+# tests
+*_test.go
