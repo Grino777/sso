@@ -11,13 +11,13 @@ import (
 	"github.com/Grino777/sso/internal/lib/logger"
 	"github.com/Grino777/sso/internal/services/auth"
 	"github.com/Grino777/sso/internal/services/jwks"
+	"github.com/Grino777/sso/internal/services/keys/store"
 )
 
 const opApp = "app."
 
 //go:generate mockgen -source=app.go -destination=mocks/admin/admin_api_mock.go -package=admin
-type AdminApi interface {
-	RegisterRoutes()
+type adminServer interface {
 	Run(ctx context.Context) error
 	Stop() error
 }
@@ -30,7 +30,7 @@ type grpcApp interface {
 
 type Apps struct {
 	Grpc grpcApp
-	Api  AdminApi
+	Api  adminServer
 }
 
 // Contains storages for App
@@ -58,15 +58,6 @@ type GrpcServices struct {
 	authService *auth.AuthService
 }
 
-// FIXME удалить
-// type AuthConfig struct {
-// 	Log         *slog.Logger
-// 	DB          storageI.Storage
-// 	Cache       storageI.CacheStorage
-// 	Tokens      config.TokenConfig
-// 	JwksService *jwks.JwksService
-// }
-
 func (s *GrpcServices) Auth() *auth.AuthService {
 	return s.authService
 }
@@ -76,19 +67,31 @@ func (s *GrpcServices) Jwks() *jwks.JwksService {
 }
 
 func NewApp(
-	logger *slog.Logger,
+	log *slog.Logger,
 ) (*SSOApp, error) {
-	app := &SSOApp{Logger: logger}
+	app := &SSOApp{Logger: log}
 
 	if err := app.loadConfig(); err != nil {
 		return app, err
 	}
 
+	// keysManager, err := km.NewKeysManager(log, app.Config.FS.KeysDir)
+	// if err != nil {
+	// 	log.Error("failed to create keys manager", logger.Error(err))
+	// 	return nil, err
+	// }
+
+	keysStore, err := store.NewKeysStore(log, app.Config.Path, app.Config.TTL)
+	if err != nil {
+		log.Error("failed to create keys store", logger.Error(err))
+		return nil, err
+	}
+
 	app.initDB()
 	app.initCache()
-	services := app.initServices()
-	app.initGRPCApp(services)
-	app.initApiServer()
+	services := app.initServices(keysStore)
+	app.initGRPCApp(services, keysStore)
+	app.initApiServer(keysStore)
 
 	return app, nil
 }

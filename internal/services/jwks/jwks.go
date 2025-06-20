@@ -2,36 +2,31 @@ package jwks
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
-	"time"
 
 	"github.com/Grino777/sso-proto/gen/go/sso"
-	"github.com/Grino777/sso/internal/services/jwks/keys"
-	"github.com/Grino777/sso/internal/services/jwks/models"
+	"github.com/Grino777/sso/internal/services/keys/models"
 )
+
+type KeysStore interface {
+	GetPublicKeys() ([]*models.JWKSToken, error)
+}
 
 type JwksService struct {
 	sso.UnimplementedJwksServer
 	log       *slog.Logger
-	keysStore *keys.KeysStore
+	keysStore KeysStore
 }
 
 func NewJwksService(
 	log *slog.Logger,
-	keysDir string,
-	tokenTTL time.Duration,
+	keysStore KeysStore,
 ) (*JwksService, error) {
 	const op = "jwks.New"
 
-	ks, err := keys.NewKeysStore(log, keysDir, tokenTTL)
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", op, err)
-	}
-
 	return &JwksService{
 		log:       log,
-		keysStore: ks,
+		keysStore: keysStore,
 	}, nil
 }
 
@@ -53,11 +48,7 @@ func (j *JwksService) GetJwks(context.Context) ([]*sso.Jwk, error) {
 	return data, nil
 }
 
-func (j *JwksService) GetLatestPrivateKey(ctx context.Context) (*models.PrivateKey, error) {
-	privateKey, err := j.keysStore.GetLatestPrivateKey()
-	if err != nil {
-		return nil, err
-	}
-
-	return privateKey, nil
-}
+// func (j *JwksService) GetLatestPrivateKey(ctx context.Context) (*models.PrivateKey, error) {
+// 	privateKey := j.keysStore.GetLatestPrivateKey()
+// 	return privateKey, nil
+// }

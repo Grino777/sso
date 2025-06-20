@@ -14,6 +14,8 @@ import (
 	"github.com/Grino777/sso/internal/lib/logger"
 	"github.com/Grino777/sso/internal/services/auth"
 	"github.com/Grino777/sso/internal/services/jwks"
+	"github.com/Grino777/sso/internal/services/keys/store"
+	keysStore "github.com/Grino777/sso/internal/services/keys/store"
 	"github.com/Grino777/sso/internal/storage/postgres"
 	redisApp "github.com/Grino777/sso/internal/storage/redis"
 	dbApp "github.com/Grino777/sso/internal/storage/sqlite"
@@ -25,8 +27,8 @@ const (
 	DBTypeSQLite   = "sqlite"
 )
 
-func (a *SSOApp) initApiServer() {
-	server := admin.NewApiServer(a.Logger, a.Config.ApiServer)
+func (a *SSOApp) initApiServer(ks *store.KeysStore) {
+	server := admin.NewApiServer(a.Logger, a.Config.ApiServer, ks)
 	a.Apps.Api = server
 	a.Logger.Debug("api server successfully initialized")
 }
@@ -75,16 +77,16 @@ func (a *SSOApp) initCache() error {
 	return nil
 }
 
-func (a *SSOApp) initGRPCApp(s *GrpcServices) {
+func (a *SSOApp) initGRPCApp(s *GrpcServices, keysStore *keysStore.KeysStore) {
 	grpcApp := grpcapp.NewGrpcApp(a.Logger, s, a.Config)
 	a.Apps.Grpc = grpcApp
 	a.Logger.Debug("gRPC server successfully initialized")
 }
 
-func (a *SSOApp) initServices() *GrpcServices {
+func (a *SSOApp) initServices(ks *keysStore.KeysStore) *GrpcServices {
 	const op = "app.initServices"
 
-	jwksService, err := a.initJwksService()
+	jwksService, err := a.initJwksService(ks)
 	if err != nil {
 		a.Logger.Warn(
 			"jwks service not initialized",
@@ -95,14 +97,14 @@ func (a *SSOApp) initServices() *GrpcServices {
 	}
 
 	authConfigs := auth.AuthService{
-		Logger:      a.Logger,
-		DB:          a.Storages.Db,
-		Cache:       a.Storages.Cache,
-		Tokens:      a.Config.Tokens,
-		JwksService: jwksService,
+		Logger:    a.Logger,
+		DB:        a.Storages.Db,
+		Cache:     a.Storages.Cache,
+		Tokens:    a.Config.TTL,
+		KeysStore: ks,
 	}
 
-	authService := auth.NewAuthService(authConfigs)
+	authService := auth.NewAuthService(authConfigs, ks)
 	a.Logger.Debug("all services successfully initialized")
 
 	return &GrpcServices{
@@ -111,10 +113,10 @@ func (a *SSOApp) initServices() *GrpcServices {
 	}
 }
 
-func (a *SSOApp) initJwksService() (*jwks.JwksService, error) {
+func (a *SSOApp) initJwksService(ks *keysStore.KeysStore) (*jwks.JwksService, error) {
 	const op = "app.initJwksService"
 
-	jwksService, err := jwks.NewJwksService(a.Logger, a.Config.FS.KeysDir, a.Config.Tokens.TokenTTL)
+	jwksService, err := jwks.NewJwksService(a.Logger, ks)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", op, err)
 	}

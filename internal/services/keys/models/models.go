@@ -1,22 +1,10 @@
 package models
 
 import (
-	"crypto/rsa"
-
 	"github.com/Grino777/sso-proto/gen/go/sso"
 )
 
-type PrivateKey struct {
-	ID      string
-	Key     *rsa.PrivateKey
-	IsSaved bool
-}
-
-type PublicKey struct {
-	ID      string
-	Key     *rsa.PublicKey
-	IsSaved bool
-}
+const opKeys = "keys.models."
 
 type JWKSToken struct {
 	Kid string

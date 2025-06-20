@@ -6,8 +6,6 @@ grpc:
   grpc_addr: "127.0.0.1"
   grpc_port: 8088
   grpc_timeout: "5s"
-tokenTTL: "1h"
-refreshTokenTTL: "168h"
 redis:
   redis_addr: "127.0.0.1:6379"
   password: ""
@@ -21,3 +19,7 @@ redis:
 api_server:
   api_addr: "127.0.0.1"
   api_port: "8089"
+TTL:
+  tokenTTL: "1h"
+  refreshTokenTTL: "168h"
+  keyTTL: "720h"

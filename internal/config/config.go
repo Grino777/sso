@@ -68,7 +68,7 @@ var (
 var envMapping = map[string]func(*Config, string){
 	suUsernameEnv: func(c *Config, v string) { c.SuperUser.Username = v },
 	suPassEnv:     func(c *Config, v string) { c.SuperUser.Password = v },
-	keysDirEnv:    func(c *Config, v string) { c.FS.KeysDir = v },
+	keysDirEnv:    func(c *Config, v string) { c.Path.KeysDir = v },
 }
 
 var envPGMapping = map[string]func(*Config, string){
@@ -84,8 +84,8 @@ type Config struct {
 	GRPC      GRPCConfig `yaml:"grpc" env-required:"true"`
 	Database  DatabaseConfig
 	Redis     RedisConfig `yaml:"redis" env-required:"true"`
-	Tokens    TokenConfig
-	FS        FileSystemConfig
+	TTL       TTLConfig
+	Path      PathConfig
 	SuperUser SuperUser
 	ApiServer ApiServerConfig `yaml:"api_server" env-required:"true"`
 }
@@ -100,12 +100,13 @@ type DatabaseConfig struct {
 	DBPort           string
 }
 
-type TokenConfig struct {
+type TTLConfig struct {
 	TokenTTL        time.Duration `yaml:"tokenTTL" env-default:"1h"`
 	RefreshTokenTTL time.Duration `yaml:"refreshTokenTTL" env-default:"168h"`
+	KeyTTL          time.Duration `yaml:"keyTTL" env-default:"720h"`
 }
 
-type FileSystemConfig struct {
+type PathConfig struct {
 	BaseDir    string
 	KeysDir    string
 	ConfigPath string
@@ -237,27 +238,27 @@ func loadConfig() (*Config, error) {
 		return nil, fmt.Errorf("%s: %w", op, err)
 	}
 
-	if _, err := os.Stat(cfg.FS.ConfigPath); err != nil {
+	if _, err := os.Stat(cfg.Path.ConfigPath); err != nil {
 		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("%s: config file does not exist: %s", op, cfg.FS.ConfigPath)
+			return nil, fmt.Errorf("%s: config file does not exist: %s", op, cfg.Path.ConfigPath)
 		}
 		return nil, fmt.Errorf("%s: cannot stat config file: %w", op, err)
 	}
 
-	if err := cleanenv.ReadConfig(cfg.FS.ConfigPath, cfg); err != nil {
-		return nil, fmt.Errorf("%s: failed to read config file %q: %w", op, cfg.FS.ConfigPath, err)
+	if err := cleanenv.ReadConfig(cfg.Path.ConfigPath, cfg); err != nil {
+		return nil, fmt.Errorf("%s: failed to read config file %q: %w", op, cfg.Path.ConfigPath, err)
 	}
 
 	if err := parseEnv(cfg); err != nil {
 		return nil, fmt.Errorf("%s: failed to parse environment variables: %w", op, err)
 	}
 
-	if err := setBaseDir(cfg, cfg.FS.ConfigPath); err != nil {
+	if err := setBaseDir(cfg, cfg.Path.ConfigPath); err != nil {
 		return nil, fmt.Errorf("%s: %w", op, err)
 	}
 
-	cfg.FS.KeysDir = filepath.Join(cfg.FS.BaseDir, "keys")
-	cfg.ApiServer.CertsDir = filepath.Join(cfg.FS.BaseDir, "certs")
+	cfg.Path.KeysDir = filepath.Join(cfg.Path.BaseDir, "keys")
+	cfg.ApiServer.CertsDir = filepath.Join(cfg.Path.BaseDir, "certs")
 
 	return cfg, nil
 }
@@ -267,11 +268,11 @@ func configPath(cfg *Config) error {
 
 	switch cfg.Mode {
 	case LocalMode:
-		cfg.FS.ConfigPath = localConfigPath
+		cfg.Path.ConfigPath = localConfigPath
 	case DevMode:
-		cfg.FS.ConfigPath = devConfigPath
+		cfg.Path.ConfigPath = devConfigPath
 	case ProdMode:
-		cfg.FS.ConfigPath = prodConfigPath
+		cfg.Path.ConfigPath = prodConfigPath
 	default:
 		return fmt.Errorf("%s: invalid mode: %s", op, cfg.Mode)
 	}
@@ -329,6 +330,6 @@ func setBaseDir(cfg *Config, configPath string) error {
 		return fmt.Errorf("%s: cannot get absolute path: %w", op, err)
 	}
 
-	cfg.FS.BaseDir = filepath.Dir(filepath.Dir(absPath))
+	cfg.Path.BaseDir = filepath.Dir(filepath.Dir(absPath))
 	return nil
 }

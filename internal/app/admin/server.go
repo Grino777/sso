@@ -14,7 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-const opServer = "app.admin."
+const opAdmin = "app.admin."
 
 type Certificate struct {
 	certPath string
@@ -24,13 +24,14 @@ type Certificate struct {
 type APIServer struct {
 	Logger *slog.Logger
 	Router *gin.Engine
+	Routes *Routes
 	Server *http.Server
 	Config config.ApiServerConfig
 }
 
-func NewApiServer(log *slog.Logger, cfg config.ApiServerConfig) *APIServer {
-	router := gin.New()
-	router.Use(gin.LoggerWithConfig(gin.LoggerConfig{
+func NewApiServer(log *slog.Logger, cfg config.ApiServerConfig, keysStore keysStore) *APIServer {
+	engine := gin.New()
+	engine.Use(gin.LoggerWithConfig(gin.LoggerConfig{
 		Formatter: func(param gin.LogFormatterParams) string {
 			log.Info("Gin request",
 				slog.String("method", param.Method),
@@ -42,41 +43,26 @@ func NewApiServer(log *slog.Logger, cfg config.ApiServerConfig) *APIServer {
 			return ""
 		},
 	}))
-	router.Use(gin.Recovery())
+	engine.Use(gin.Recovery())
 
 	server := &http.Server{
 		Addr:    cfg.Addr + ":" + cfg.Port,
-		Handler: router,
+		Handler: engine,
 	}
+
+	routes := NewRoutes(keysStore)
+	routes.RegisterRoutes(engine)
 
 	return &APIServer{
 		Logger: log,
-		Router: router,
+		Router: engine,
 		Server: server,
 		Config: cfg,
 	}
 }
 
-func (as *APIServer) RegisterRoutes() {
-	const op = opServer + "RegisterRoutes"
-
-	log := as.Logger.With(slog.String("op", op))
-
-	for _, route := range routes {
-		switch route.method {
-		case "GET":
-			as.Router.GET(route.path, route.handler)
-		case "POST":
-			as.Router.POST(route.path, route.handler)
-		}
-		log.Debug("route successfully registred",
-			slog.String("method", route.method),
-			slog.String("path", route.path))
-	}
-}
-
 func (as *APIServer) Run(ctx context.Context) error {
-	const op = opServer + "Run"
+	const op = opAdmin + "Run"
 
 	errChan := make(chan error, 1)
 
@@ -84,8 +70,6 @@ func (as *APIServer) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-
-	as.RegisterRoutes()
 
 	go func() {
 		if err := as.Server.ListenAndServeTLS(cert.certPath, cert.keyPath); err != nil && err != http.ErrServerClosed {
@@ -113,7 +97,7 @@ func (as *APIServer) Run(ctx context.Context) error {
 }
 
 func (as *APIServer) Stop() error {
-	const op = opServer + "Stop"
+	const op = opAdmin + "Stop"
 
 	log := as.Logger.With(slog.String("op", op))
 
@@ -130,7 +114,7 @@ func (as *APIServer) Stop() error {
 }
 
 func (as *APIServer) init() (Certificate, error) {
-	const op = opServer + "init"
+	const op = opAdmin + "init"
 
 	var certObj Certificate
 

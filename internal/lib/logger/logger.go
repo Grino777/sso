@@ -12,3 +12,8 @@ func NewLogger(out io.Writer,
 	handler := slog.NewJSONHandler(out, options)
 	return slog.New(handler)
 }
+
+func AddAttrs(log *slog.Logger, key, value string) *slog.Logger {
+	l := log.With(slog.String(key, value))
+	return l
+}

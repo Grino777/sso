@@ -8,7 +8,7 @@ import (
 
 	"github.com/Grino777/sso/internal/config"
 	"github.com/Grino777/sso/internal/domain/models"
-	jwksM "github.com/Grino777/sso/internal/services/jwks/models"
+	keysModels "github.com/Grino777/sso/internal/services/keys/models"
 
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -16,8 +16,8 @@ import (
 func CreateNewTokens(
 	user models.User,
 	app models.App,
-	pk *jwksM.PrivateKey,
-	tokens config.TokenConfig,
+	pk *keysModels.PrivateKey,
+	tokens config.TTLConfig,
 ) (models.Tokens, error) {
 	acessToken, err := NewAccessToken(user, app, pk, tokens.TokenTTL)
 	if err != nil {
@@ -39,7 +39,7 @@ func CreateNewTokens(
 func NewAccessToken(
 	user models.User,
 	app models.App,
-	pk *jwksM.PrivateKey,
+	pk *keysModels.PrivateKey,
 	d time.Duration,
 ) (models.Token, error) {
 	const op = "lib.jwt.NewAccessToken"

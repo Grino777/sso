@@ -11,7 +11,7 @@ import (
 	"github.com/Grino777/sso/internal/domain/models"
 	interfaces "github.com/Grino777/sso/internal/interfaces/storage"
 	"github.com/Grino777/sso/internal/lib/logger"
-	jwksM "github.com/Grino777/sso/internal/services/jwks/models"
+	keysModels "github.com/Grino777/sso/internal/services/keys/models"
 	"github.com/Grino777/sso/internal/storage"
 	authU "github.com/Grino777/sso/internal/utils/auth"
 )
@@ -20,30 +20,31 @@ var (
 	ErrInvalidCredentials = errors.New("invalid credentials")
 )
 
-type JwksProvider interface {
-	GetLatestPrivateKey(ctx context.Context) (*jwksM.PrivateKey, error)
+type KeysStore interface {
+	GetLatestPrivateKey() *keysModels.PrivateKey
+	GenerateNewKeys() (*keysModels.PrivateKey, error)
 }
 
-// Объект для взаимодейсвтия с БД
 type AuthService struct {
-	Logger      *slog.Logger
-	DB          interfaces.Storage
-	Cache       interfaces.CacheStorage
-	Tokens      config.TokenConfig
-	JwksService JwksProvider
+	Logger    *slog.Logger
+	DB        interfaces.Storage
+	Cache     interfaces.CacheStorage
+	Tokens    config.TTLConfig
+	KeysStore KeysStore
 }
 
 func NewAuthService(
 	authConfigs AuthService,
+	keysStore KeysStore,
 ) *AuthService {
 	authConfigs.Logger.Debug("auth service successfully initialized")
 
 	return &AuthService{
-		Logger:      authConfigs.Logger,
-		DB:          authConfigs.DB,
-		Cache:       authConfigs.Cache,
-		Tokens:      authConfigs.Tokens,
-		JwksService: authConfigs.JwksService,
+		Logger:    authConfigs.Logger,
+		DB:        authConfigs.DB,
+		Cache:     authConfigs.Cache,
+		Tokens:    authConfigs.Tokens,
+		KeysStore: keysStore,
 	}
 }
 
