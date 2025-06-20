@@ -84,7 +84,7 @@ type Config struct {
 	GRPC      GRPCConfig `yaml:"grpc" env-required:"true"`
 	Database  DatabaseConfig
 	Redis     RedisConfig `yaml:"redis" env-required:"true"`
-	TTL       TTLConfig
+	TTL       TTLConfig   `yaml:"ttl" env-required:"true"`
 	Path      PathConfig
 	SuperUser SuperUser
 	ApiServer ApiServerConfig `yaml:"api_server" env-required:"true"`

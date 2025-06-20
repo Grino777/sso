@@ -65,11 +65,23 @@ func (ks *KeysStore) GetPublicKeys() ([]*models.JWKSToken, error) {
 			if err := publicKey.DeletePair(); err != nil {
 				return nil, err
 			}
+			continue
 		}
 
 		jwksToken := publicKey.ConvertToJWKS()
 		data = append(data, jwksToken)
 	}
+	if len(ks.PublicKeys) == 0 {
+		keys, err := ks.keysManager.GeneratePairKeys()
+		if err != nil {
+			return nil, err
+		}
+		ks.PrivateKey = keys.PrivateKey
+		ks.PublicKeys[keys.PrivateKey.ID] = keys.PublicKey
+		jwksToken := keys.PublicKey.ConvertToJWKS()
+		data = append(data, jwksToken)
+	}
+
 	return data, nil
 }
 

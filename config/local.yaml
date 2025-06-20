@@ -19,7 +19,7 @@ redis:
 api_server:
   api_addr: "127.0.0.1"
   api_port: "8089"
-TTL:
-  tokenTTL: "1h"
+ttl:
+  tokenTTL: "10s"
   refreshTokenTTL: "168h"
-  keyTTL: "720h"
+  keyTTL: "10s"
