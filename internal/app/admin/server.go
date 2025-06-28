@@ -29,6 +29,7 @@ type APIServer struct {
 	Config config.ApiServerConfig
 }
 
+// NewApiServer создает новый экземпляр APIServer
 func NewApiServer(log *slog.Logger, cfg config.ApiServerConfig, keysStore keysStore) *APIServer {
 	engine := gin.New()
 	engine.Use(gin.LoggerWithConfig(gin.LoggerConfig{
@@ -61,6 +62,7 @@ func NewApiServer(log *slog.Logger, cfg config.ApiServerConfig, keysStore keysSt
 	}
 }
 
+// Run запускает сервер
 func (as *APIServer) Run(ctx context.Context) error {
 	const op = opAdmin + "Run"
 
@@ -96,6 +98,7 @@ func (as *APIServer) Run(ctx context.Context) error {
 	return nil
 }
 
+// Stop останавливает сервер
 func (as *APIServer) Stop() error {
 	const op = opAdmin + "Stop"
 
@@ -113,6 +116,8 @@ func (as *APIServer) Stop() error {
 	return nil
 }
 
+// init Проверяет существование директории и файлов сертификата
+// и создает сертификаты если их нет
 func (as *APIServer) init() (Certificate, error) {
 	const op = opAdmin + "init"
 

@@ -47,8 +47,3 @@ func (j *JwksService) GetJwks(context.Context) ([]*sso.Jwk, error) {
 
 	return data, nil
 }
-
-// func (j *JwksService) GetLatestPrivateKey(ctx context.Context) (*models.PrivateKey, error) {
-// 	privateKey := j.keysStore.GetLatestPrivateKey()
-// 	return privateKey, nil
-// }

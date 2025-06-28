@@ -25,6 +25,7 @@ import (
 
 const opGrpc = "app.grpc."
 
+// Сервисы приложения
 type Services interface {
 	Auth() *auth.AuthService
 	Jwks() *jwks.JwksService
@@ -38,6 +39,7 @@ type GRPCApp struct {
 	mode       string
 }
 
+// NewGrpcApp создает новый объект приложения для управления GRPC сервером
 func NewGrpcApp(
 	log *slog.Logger,
 	services Services,
@@ -75,7 +77,7 @@ func NewGrpcApp(
 	}
 }
 
-// Run gRPC Server
+// Run запускает GRPC-сервер
 func (a *GRPCApp) Run(ctx context.Context) error {
 	const op = opGrpc + "Run"
 

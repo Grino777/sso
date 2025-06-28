@@ -38,4 +38,8 @@ lint-log.log
 bin
 
 # tests
-*_test.go
+/test_keys
+app_test.go
+
+# Continue
+.continue

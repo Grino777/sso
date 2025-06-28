@@ -28,6 +28,7 @@ var (
 	errInvalidArgs      = status.Error(codes.Unauthenticated, "invalid or missing authorization")
 )
 
+// ReqMetadata содержит данные из заголовка запроса
 type ReqMetadata struct {
 	appID     uint64
 	timestamp string
@@ -42,6 +43,7 @@ func InterceptorLogger(l *slog.Logger) logging.Logger {
 	})
 }
 
+// HMACInterceptor проверяет HMAC-токен в заголовке запроса
 func HMACInterceptor(
 	log *slog.Logger,
 	services Services,
@@ -66,7 +68,7 @@ func HMACInterceptor(
 	}
 }
 
-// Валидирует запрос от приложений
+// validateHMAC проверяет HMAC-токен в заголовке запроса
 func validateHMAC(ctx context.Context,
 	log *slog.Logger,
 	req any,
