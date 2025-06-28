@@ -50,13 +50,9 @@ func (s *AuthService) generateUserTokens(ctx context.Context, user models.User, 
 
 	log := s.Logger.With(slog.String("op", op), slog.String("username", user.Username))
 
-	privateKey := s.KeysStore.GetLatestPrivateKey()
-	if privateKey.CheckExpiration() {
-		newPrivateKey, err := s.KeysStore.GenerateNewKeys()
-		if err != nil {
-			return models.User{}, err
-		}
-		privateKey = newPrivateKey
+	privateKey, err := s.KeysStore.GetLatestPrivateKey()
+	if err != nil {
+		return models.User{}, err
 	}
 
 	tokens, err := jwt.CreateNewTokens(user, app, privateKey, s.Tokens)

@@ -21,7 +21,7 @@ var (
 )
 
 type KeysStore interface {
-	GetLatestPrivateKey() *keysModels.PrivateKey
+	GetLatestPrivateKey() (*keysModels.PrivateKey, error)
 	GenerateNewKeys() (*keysModels.PrivateKey, error)
 }
 

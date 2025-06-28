@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path"
+	"path/filepath"
 	"time"
 
 	"github.com/Grino777/sso/internal/config"
@@ -60,8 +61,6 @@ func NewKeysManager(
 func (km *KeysManager) LoadKeys() (*Keys, error) {
 	const op = opKeysManager + "LoadKeys"
 
-	log := logger.AddAttrs(km.log, "op", op)
-
 	keys := &Keys{
 		PublicKeys: make(map[string]*models.PublicKey),
 	}
@@ -73,57 +72,37 @@ func (km *KeysManager) LoadKeys() (*Keys, error) {
 
 	pemFiles := km.getPemFiles(entries)
 	if len(pemFiles) == 0 {
-		newKeys, err := km.GeneratePairKeys()
+		keys, err := km.generateNewPair()
 		if err != nil {
 			return nil, err
 		}
-
-		keys.PrivateKey = newKeys.PrivateKey
-		keys.PublicKeys[newKeys.PrivateKey.ID] = newKeys.PublicKey
 		return keys, nil
 	}
-
 	uuids, err := sortPemFiles(pemFiles)
 	if err != nil {
 		return nil, err
 	}
 
-	activeKeys := make(map[int]*models.PrivateKey)
-
-	for i, file := range uuids {
-		privateKey, err := models.DecodePemToPrivateKey(file.Name(), km.keysDir, km.keyTTL, km.tokenTTL)
+	activeKeys := km.decodePemFiles(uuids)
+	if len(activeKeys) == 0 {
+		keys, err := km.generateNewPair()
 		if err != nil {
-			if errors.Is(err, models.ErrPublicKeyExpired) {
-				continue
-			}
-			log.Error("failed to decode pem file for %s key", file.Name(), logger.Error(err))
-			continue
+			return nil, err
 		}
-		if i == 0 {
-			keys.PrivateKey = privateKey
-		}
-		keys.PublicKeys[privateKey.ID] = privateKey.GetPublicKey()
-		activeKeys[i] = privateKey
+		return keys, nil
 	}
 
-	if err := deleteAllKeys(km.keysDir); err != nil {
-		return nil, err
-	}
-
+	keys.PrivateKey = activeKeys[0]
 	for _, key := range activeKeys {
-		if key != nil {
-			if err := key.SaveToFile(km.keysDir); err != nil {
-				log.Error("failed to save private key: %s", key.ID, logger.Error(err))
-				continue
-			}
-		}
+		keys.PublicKeys[key.ID] = key.GetPublicKey()
 	}
-
 	return keys, nil
 }
 
 func (km *KeysManager) GeneratePairKeys() (*GenKeys, error) {
 	const op = opKeysManager + "generatePrivateKey"
+
+	km.log.Debug("generating new pair keys")
 
 	privateKey, err := models.NewPrivateKey(km.keyTTL, km.tokenTTL, km.keysDir)
 	if err != nil {
@@ -138,6 +117,19 @@ func (km *KeysManager) GeneratePairKeys() (*GenKeys, error) {
 		PrivateKey: privateKey,
 		PublicKey:  privateKey.GetPublicKey(),
 	}
+	return keys, nil
+}
+
+// RotateKeys rotates the keys in the store.
+func (km *KeysManager) RotateKeys() (*GenKeys, error) {
+	const op = opKeysManager + "RotateKeys"
+
+	keys, err := km.GeneratePairKeys()
+	if err != nil {
+		return nil, err
+	}
+
+	km.log.Debug("successfully rotate keys")
 	return keys, nil
 }
 
@@ -166,4 +158,51 @@ func (km *KeysManager) getPemFiles(entries []os.DirEntry) []os.DirEntry {
 		}
 	}
 	return pemFiles
+}
+
+func (km *KeysManager) decodePemFiles(sortedUuids []os.DirEntry) []*models.PrivateKey {
+	const op = opKeysManager + "decodePemFiles"
+
+	activeKeys := make([]*models.PrivateKey, 0, len(sortedUuids))
+	for _, file := range sortedUuids {
+		filename := file.Name()
+		privateKey, err := models.DecodePemToPrivateKey(file.Name(), km.keysDir, km.keyTTL, km.tokenTTL)
+		if err != nil {
+			if errors.Is(err, models.ErrPublicKeyExpired) {
+				km.log.Debug("pem file is expired", "filename", filename)
+			} else {
+				km.log.Error("failed to decode pem file", "filename", filename, logger.Error(err))
+			}
+			if err := km.deletePemFile(filename); err != nil {
+				km.log.Error("%s: failed to remove pem file %v", filename, err)
+				continue
+			}
+		}
+		activeKeys = append(activeKeys, privateKey)
+	}
+	return activeKeys
+}
+
+func (km *KeysManager) deletePemFile(pemUUID string) error {
+	const op = opKeysManager + "deletePemFile"
+
+	path := filepath.Join(km.keysDir, pemUUID)
+	if err := os.Remove(path); err != nil {
+		return fmt.Errorf("%s: %v", op, err)
+	}
+	return nil
+}
+
+func (km *KeysManager) generateNewPair() (*Keys, error) {
+	keys := &Keys{
+		PublicKeys: make(map[string]*models.PublicKey),
+	}
+
+	newKeys, err := km.GeneratePairKeys()
+	if err != nil {
+		return nil, err
+	}
+	keys.PrivateKey = newKeys.PrivateKey
+	keys.PublicKeys[newKeys.PrivateKey.ID] = newKeys.PublicKey
+	return keys, nil
 }

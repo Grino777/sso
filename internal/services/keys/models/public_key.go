@@ -29,13 +29,13 @@ func NewPublicKey(privateKey *PrivateKey, tokenTTL time.Duration, keysDir string
 		prirvateKey: privateKey,
 	}
 
-	if publicKey.CheckExpirationTime() {
+	if publicKey.IsExpired() {
 		return nil, ErrPublicKeyExpired
 	}
 	return publicKey, nil
 }
 
-func (pk *PublicKey) CheckExpirationTime() bool {
+func (pk *PublicKey) IsExpired() bool {
 	now := time.Now().Local()
 
 	if pk.ExpireAt.After(now) {
