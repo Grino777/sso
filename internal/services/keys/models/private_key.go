@@ -96,7 +96,7 @@ func (pk *PrivateKey) SaveToFile(keysDir string) error {
 	return nil
 }
 
-func (pk *PrivateKey) CheckExpiration() bool {
+func (pk *PrivateKey) IsExpired() bool {
 	now := time.Now()
 	endedTime := pk.CreatedAt.Add(pk.keyTTL)
 
@@ -161,6 +161,7 @@ func DecodePemToPrivateKey(
 		filePath:  absKeyPath,
 		keyTTL:    keyTTL,
 	}
+
 	publicKey, err := NewPublicKey(keyInstance, tokenTTL, keysDir)
 	if err != nil {
 		return keyInstance, err

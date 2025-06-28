@@ -15,6 +15,7 @@ type JWKSToken struct {
 	E   string
 }
 
+// ConvertToken конвертирует JWKSToken в sso.Jwk
 func (jt *JWKSToken) ConvertToken() *sso.Jwk {
 	return &sso.Jwk{
 		Kid: jt.Kid,
