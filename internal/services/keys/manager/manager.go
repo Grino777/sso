@@ -175,8 +175,8 @@ func (km *KeysManager) decodePemFiles(sortedUuids []os.DirEntry) []*models.Priva
 			}
 			if err := km.deletePemFile(filename); err != nil {
 				km.log.Error("%s: failed to remove pem file %v", filename, err)
-				continue
 			}
+			continue
 		}
 		activeKeys = append(activeKeys, privateKey)
 	}
@@ -190,6 +190,7 @@ func (km *KeysManager) deletePemFile(pemUUID string) error {
 	if err := os.Remove(path); err != nil {
 		return fmt.Errorf("%s: %v", op, err)
 	}
+	km.log.Debug("pem file removed", "filename", pemUUID, "op", op)
 	return nil
 }
 

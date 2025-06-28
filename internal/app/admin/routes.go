@@ -1,11 +1,15 @@
 package admin
 
 import (
+	"fmt"
+	"net/http"
+
+	"github.com/Grino777/sso/internal/services/keys/manager"
 	"github.com/gin-gonic/gin"
 )
 
 type keysStore interface {
-	RotateKeys() error
+	RotateKeys() (*manager.GenKeys, error)
 }
 
 type Route struct {
@@ -40,6 +44,11 @@ func (r *Routes) initRoutes() []*Route {
 			path:    "/ping",
 			handler: r.ping,
 		},
+		{
+			method:  "POST",
+			path:    "/rotate-keys",
+			handler: r.rotateKeys,
+		},
 	}
 }
 
@@ -47,4 +56,12 @@ func (r *Routes) ping(c *gin.Context) {
 	c.JSON(200, gin.H{
 		"message": "PONG",
 	})
+}
+
+func (r *Routes) rotateKeys(c *gin.Context) {
+	if _, err := r.keysStore.RotateKeys(); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": fmt.Sprintf("failed to rotate keys: %v", err)})
+	}
+	c.JSON(200, gin.H{"message": "keys rotated"})
 }
